@@ -1,0 +1,18 @@
+name: Postman PR Diff
+description: Summarize semantic request-level changes to Postman Collection v2.1 files in pull requests.
+author: techtwin
+inputs:
+  github-token:
+    description: GitHub token used to read pull-request files and publish the report.
+    required: true
+  collection-file-suffix:
+    description: Only files whose current or previous name ends with this suffix are evaluated.
+    required: false
+    default: .postman_collection.json
+  comment-marker:
+    description: Stable HTML marker used to find and update the pull request comment.
+    required: false
+    default: postman-pr-diff
+runs:
+  using: node20
+  main: dist/index.js
