@@ -3,7 +3,7 @@ description: Summarize semantic request-level changes to Postman Collection v2.1
 author: techtwin
 inputs:
   github-token:
-    description: GitHub token with contents: read and pull-requests: write permission.
+    description: "GitHub token with contents: read and pull-requests: write permission."
     required: true
   collection-file-suffix:
     description: Only files whose current or previous name ends with this suffix are evaluated.
