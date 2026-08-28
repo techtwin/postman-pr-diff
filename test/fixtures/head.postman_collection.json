@@ -1,0 +1,44 @@
+{
+  "item": [
+    {
+      "item": [
+        {
+          "request": {
+            "body": {"options": {"raw": {"language": "json"}}, "raw": "{\"email\":\"a@example.test\"}", "mode": "raw"},
+            "header": [{"value": "application/json", "key": "content-type"}],
+            "url": {"path": ["login"], "host": ["api", "example", "test"], "raw": "https://api.example.test/login"},
+            "method": "POST"
+          },
+          "name": "Login"
+        }
+      ],
+      "name": "Auth"
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "Get user",
+          "request": {
+            "method": "GET",
+            "url": "https://api.example.test/users/{{id}}",
+            "header": [{"key": "Accept", "value": "application/vnd.example+json"}]
+          }
+        },
+        {
+          "name": "Admin",
+          "item": [
+            {
+              "name": "List audits",
+              "request": {"method": "GET", "url": "https://api.example.test/users/audits"}
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "info": {
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "name": "Example API"
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "info": {
+    "name": "Example API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "url": {"raw": "https://api.example.test/login", "host": ["api", "example", "test"], "path": ["login"]},
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\"email\":\"a@example.test\"}", "options": {"raw": {"language": "json"}}}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "Get user",
+          "request": {
+            "method": "GET",
+            "url": "https://api.example.test/users/{{id}}",
+            "header": [{"key": "Accept", "value": "application/json"}]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Legacy",
+      "item": [
+        {
+          "name": "Delete user",
+          "request": {"method": "DELETE", "url": "https://api.example.test/users/{{id}}"}
+        }
+      ]
+    }
+  ]
+}
