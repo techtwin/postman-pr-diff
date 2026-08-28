@@ -170,13 +170,16 @@ async function run() {
   core.info(summaryText(results));
 }
 
-run().catch((error) => {
-  core.warning(`Postman PR diff could not complete: ${error.message}`);
-});
+if (require.main === module) {
+  run().catch((error) => {
+    core.warning(`Postman PR diff could not complete: ${error.message}`);
+  });
+}
 
 module.exports = {
   compareFile,
   isMatchingCollection,
+  publishComment,
   readFileAtRef,
   summaryText,
 };

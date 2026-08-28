@@ -17,8 +17,7 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
-  issues: write
+  pull-requests: write
 
 jobs:
   diff:
@@ -29,7 +28,7 @@ jobs:
           github-token: ${{ github.token }}
 ```
 
-`contents: read` retrieves collection contents, `pull-requests: read` lists changed files and resolves the merge base, and `issues: write` creates or updates the sticky PR comment. The report is non-blocking: permission or API failures generate warnings and do not fail the job.
+`contents: read` retrieves collection contents. `pull-requests: write` is required both to inspect the pull request and to create or update its conversation comment. Although GitHub exposes pull-request conversation comments at an `issues` REST endpoint, granting only `issues: write` does not authorize this operation for a pull request. The report is non-blocking: permission or API failures generate warnings and do not fail the job.
 
 For pull requests from forks, GitHub downgrades the provided token to read-only. The Action still performs safe reads and writes the job summary, but it may be unable to create or update the PR comment. Do **not** replace this with `pull_request_target`; that event would make untrusted PR data available to a write-scoped workflow.
 
@@ -39,7 +38,7 @@ The included workflow first checks out the repository's default branch at a pinn
 
 | Input | Default | Purpose |
 | --- | --- | --- |
-| `github-token` | Required | Usually `${{ github.token }}`. |
+| `github-token` | Required | Usually `${{ github.token }}` with `contents: read` and `pull-requests: write`. |
 | `collection-file-suffix` | `.postman_collection.json` | Evaluates changed files whose current or previous name ends with the suffix. |
 | `comment-marker` | `postman-pr-diff` | Namespace for the idempotently updated comment. |
 
