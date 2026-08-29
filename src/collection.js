@@ -33,6 +33,26 @@ function normalizeHeaders(headers) {
     });
 }
 
+function normalizeBody(body) {
+  if (!body || typeof body !== 'object') {
+    return body || null;
+  }
+
+  const normalized = stableValue(body);
+  if (normalized.mode !== 'raw' || typeof normalized.raw !== 'string') {
+    return normalized;
+  }
+
+  try {
+    return {
+      ...normalized,
+      raw: JSON.stringify(stableValue(JSON.parse(normalized.raw))),
+    };
+  } catch {
+    return normalized;
+  }
+}
+
 function normalizeRequest(request) {
   const source = request && typeof request === 'object' ? request : {};
 
@@ -40,7 +60,7 @@ function normalizeRequest(request) {
     method: String(source.method || 'GET').toUpperCase(),
     url: source.url || '',
     header: normalizeHeaders(source.header),
-    body: source.body || null,
+    body: normalizeBody(source.body),
     auth: source.auth || null,
   });
 }
@@ -108,6 +128,7 @@ function canonicalRequest(request) {
 module.exports = {
   canonicalRequest,
   normalizeRequest,
+  normalizeBody,
   parseCollection,
   stableValue,
 };
