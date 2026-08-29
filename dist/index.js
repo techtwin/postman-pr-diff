@@ -30131,7 +30131,7 @@ const core = __nccwpck_require__(7484);
 const github = __nccwpck_require__(3228);
 const { parseCollection } = __nccwpck_require__(5405);
 const { compareCollections, countChanges } = __nccwpck_require__(9898);
-const { renderReport } = __nccwpck_require__(9121);
+const { normalizeUrlDisplay, renderReport } = __nccwpck_require__(9121);
 
 function isMatchingCollection(file, suffix) {
   return [file.filename, file.previous_filename].some(
@@ -30238,6 +30238,11 @@ async function run() {
   const token = core.getInput('github-token', { required: true });
   const suffix = core.getInput('collection-file-suffix') || '.postman_collection.json';
   const markerName = core.getInput('comment-marker') || 'postman-pr-diff';
+  const requestedUrlDisplay = core.getInput('url-display') || 'path-only';
+  const urlDisplay = normalizeUrlDisplay(requestedUrlDisplay);
+  if (urlDisplay !== requestedUrlDisplay) {
+    core.warning(`Unknown url-display "${requestedUrlDisplay}"; using path-only.`);
+  }
   const marker = `${markerName}:${github.context.repo.owner}/${github.context.repo.repo}:${pullRequest.number}`;
   const octokit = github.getOctokit(token);
   const repository = github.context.repo;
@@ -30277,7 +30282,7 @@ async function run() {
         currentPull.data.head.sha,
       )),
   );
-  const report = renderReport(results, marker);
+  const report = renderReport(results, marker, urlDisplay);
 
   try {
     await publishComment(octokit, repository, pullRequest.number, marker, report);
@@ -30324,10 +30329,9 @@ const { canonicalRequest } = __nccwpck_require__(5405);
 const { changedRequestFields, countChanges } = __nccwpck_require__(9898);
 
 const MAX_INLINE_LENGTH = 320;
-const MAX_BODY_LENGTH = 20_000;
-const MAX_BODY_LINES = 240;
-const MAX_DIFF_LINES = 140;
+const MAX_JSON_CHANGES = 60;
 const SENSITIVE_NAME = /(?:authorization|cookie|token|secret|password|api[-_]?key|apikey|access[-_]?key|private[-_]?key|^key$)/i;
+const URL_DISPLAY_MODES = new Set(['full', 'path-only', 'hidden']);
 
 function escapeMarkdown(value) {
   return String(value).replace(/([\\`*_[\]{}()#+\-.!|<>])/g, '\\$1');
@@ -30399,7 +30403,10 @@ function decodeURIComponentSafely(value) {
 function urlParts(url) {
   const raw = rawUrl(url);
   const [withoutFragment] = raw.split('#', 1);
-  const [path, query = ''] = withoutFragment.split('?', 2);
+  const [location, query = ''] = withoutFragment.split('?', 2);
+  const absolute = location.match(/^([a-z][a-z0-9+.-]*:\/\/[^/?#]+)(\/.*)?$/i);
+  const templated = location.match(/^\{\{[^}]+\}\}(\/.*)?$/);
+  const path = absolute?.[2] || templated?.[1] || location || '/';
   const queryEntries = query
     .split('&')
     .filter(Boolean)
@@ -30415,26 +30422,45 @@ function urlParts(url) {
       return keyOrder || left.value.localeCompare(right.value);
     });
 
-  return { path, queryEntries };
+  return { location, path, queryEntries };
 }
 
 function safeUrl(url) {
   const parts = urlParts(url);
-  const safePath = parts.path.replace(
+  const safeLocation = parts.location.replace(
     /^([a-z][a-z0-9+.-]*:\/\/)[^/@\s]+@/i,
     '$1[redacted]@',
   );
   const query = parts.queryEntries
     .map(({ key, value }) => `${key}=${isSensitiveName(key) ? '[redacted]' : value}`)
     .join('&');
-  return query ? `${safePath}?${query}` : safePath;
+  return query ? `${safeLocation}?${query}` : safeLocation;
 }
 
-function requestLabel(request) {
-  return `${request.method} ${safeUrl(request.url)}`;
+function normalizeUrlDisplay(value) {
+  return URL_DISPLAY_MODES.has(value) ? value : 'path-only';
 }
 
-function requestLines(label, entries) {
+function displayUrl(url, mode) {
+  switch (normalizeUrlDisplay(mode)) {
+    case 'full':
+      return safeUrl(url);
+    case 'hidden':
+      return '[URL hidden]';
+    default:
+      return urlParts(url).path;
+  }
+}
+
+function requestLabel(request, urlDisplay) {
+  return `${request.method} ${displayUrl(request.url, urlDisplay)}`;
+}
+
+function requestName(key) {
+  return String(key).split(' / ').at(-1);
+}
+
+function requestLines(label, entries, urlDisplay) {
   if (entries.length === 0) {
     return '';
   }
@@ -30442,7 +30468,7 @@ function requestLines(label, entries) {
   return [
     `<details><summary>${label} (${entries.length})</summary>`,
     '',
-    ...entries.map((entry) => `- ${inlineCode(entry.key)}: ${inlineCode(requestLabel(entry.after || entry.before))}`),
+    ...entries.map((entry) => `- ${inlineCode(entry.key)}: ${inlineCode(requestLabel(entry.after || entry.before, urlDisplay))}`),
     '',
     '</details>',
     '',
@@ -30496,20 +30522,25 @@ function queryMap(entries) {
   const values = new Map();
   for (const { key, value } of entries) {
     const current = values.get(key) || [];
-    current.push(isSensitiveName(key) ? '<redacted>' : value);
+    current.push(isSensitiveName(key) ? '[redacted]' : value);
     values.set(key, current.sort((left, right) => left.localeCompare(right)));
   }
   return values;
 }
 
-function renderUrlChanges(before, after) {
+function renderUrlChanges(before, after, urlDisplay) {
+  const mode = normalizeUrlDisplay(urlDisplay);
+  if (mode === 'hidden') {
+    return ['**URL**', '', '- URL changed; URL details are hidden by configuration.', ''];
+  }
+
   const previous = urlParts(before);
   const current = urlParts(after);
-  const lines = [
-    '**URL**',
-    '',
-    `- Value: ${inlineCode(safeUrl(before))} -> ${inlineCode(safeUrl(after))}`,
-  ];
+  const lines = ['**URL**', ''];
+
+  if (mode === 'full') {
+    lines.push(`- Value: ${inlineCode(safeUrl(before))} -> ${inlineCode(safeUrl(after))}`);
+  }
 
   if (previous.path !== current.path) {
     lines.push(`- Path: ${inlineCode(previous.path)} -> ${inlineCode(current.path)}`);
@@ -30523,11 +30554,17 @@ function renderUrlChanges(before, after) {
     const oldValues = previousQuery.get(name);
     const newValues = currentQuery.get(name);
     if (!oldValues) {
-      lines.push(`- Query added ${inlineCode(name)}: ${inlineCode(newValues.join(', '))}`);
+      lines.push(mode === 'full'
+        ? `- Query added ${inlineCode(name)}: ${inlineCode(newValues.join(', '))}`
+        : `- Query added ${inlineCode(name)}`);
     } else if (!newValues) {
-      lines.push(`- Query removed ${inlineCode(name)}: ${inlineCode(oldValues.join(', '))}`);
+      lines.push(mode === 'full'
+        ? `- Query removed ${inlineCode(name)}: ${inlineCode(oldValues.join(', '))}`
+        : `- Query removed ${inlineCode(name)}`);
     } else if (canonicalRequest(oldValues) !== canonicalRequest(newValues)) {
-      lines.push(`- Query changed ${inlineCode(name)}: ${inlineCode(oldValues.join(', '))} -> ${inlineCode(newValues.join(', '))}`);
+      lines.push(mode === 'full'
+        ? `- Query changed ${inlineCode(name)}: ${inlineCode(oldValues.join(', '))} -> ${inlineCode(newValues.join(', '))}`
+        : `- Query changed ${inlineCode(name)}`);
     }
   }
 
@@ -30538,78 +30575,144 @@ function canonicalJson(value) {
   return JSON.stringify(redactValue(value), null, 2);
 }
 
-function jsonBody(body) {
+function jsonBodyValue(body) {
   if (!body || body.mode !== 'raw' || typeof body.raw !== 'string') {
     return null;
   }
 
   try {
-    return canonicalJson(JSON.parse(body.raw));
+    return JSON.parse(body.raw);
   } catch {
     return null;
   }
 }
 
-function lineDiff(before, after) {
-  const beforeLines = before.split('\n');
-  const afterLines = after.split('\n');
-  if (beforeLines.length > MAX_BODY_LINES || afterLines.length > MAX_BODY_LINES) {
+function jsonPath(path, key) {
+  if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key)) {
+    return `${path}.${key}`;
+  }
+  return `${path}[${JSON.stringify(key)}]`;
+}
+
+function stableJson(value) {
+  return JSON.stringify(redactValue(value));
+}
+
+function jsonValue(value) {
+  return truncateText(canonicalJson(value));
+}
+
+function findJsonChanges(before, after, path = '$', changes = []) {
+  if (stableJson(before) === stableJson(after)) {
+    return changes;
+  }
+
+  if (Array.isArray(before) || Array.isArray(after)) {
+    changes.push({
+      type: 'array-replaced',
+      path,
+      beforeLength: Array.isArray(before) ? before.length : null,
+      afterLength: Array.isArray(after) ? after.length : null,
+    });
+    return changes;
+  }
+
+  const beforeObject = before && typeof before === 'object';
+  const afterObject = after && typeof after === 'object';
+  if (!beforeObject || !afterObject) {
+    changes.push({ type: 'updated', path, before, after });
+    return changes;
+  }
+
+  const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])]
+    .sort((left, right) => left.localeCompare(right));
+  for (const key of keys) {
+    const childPath = jsonPath(path, key);
+    if (!(key in before)) {
+      changes.push({ type: 'added', path: childPath, value: after[key] });
+    } else if (!(key in after)) {
+      changes.push({ type: 'removed', path: childPath, value: before[key] });
+    } else {
+      findJsonChanges(before[key], after[key], childPath, changes);
+    }
+  }
+  return changes;
+}
+
+function compactMovedJsonValues(changes) {
+  const additions = changes.filter((change) => change.type === 'added');
+  const consumed = new Set();
+
+  function singleChildWrapperPath(value, target, path) {
+    let current = value;
+    let currentPath = path;
+    while (current && typeof current === 'object' && !Array.isArray(current)) {
+      const keys = Object.keys(current);
+      if (keys.length !== 1) {
+        return null;
+      }
+      currentPath = jsonPath(currentPath, keys[0]);
+      current = current[keys[0]];
+      if (stableJson(current) === stableJson(target)) {
+        return currentPath;
+      }
+    }
     return null;
   }
 
-  const table = Array.from(
-    { length: beforeLines.length + 1 },
-    () => Array(afterLines.length + 1).fill(0),
-  );
-  for (let left = beforeLines.length - 1; left >= 0; left -= 1) {
-    for (let right = afterLines.length - 1; right >= 0; right -= 1) {
-      table[left][right] = beforeLines[left] === afterLines[right]
-        ? table[left + 1][right + 1] + 1
-        : Math.max(table[left + 1][right], table[left][right + 1]);
+  return changes.flatMap((change) => {
+    if (change.type !== 'removed') {
+      return consumed.has(change) ? [] : [change];
     }
-  }
-
-  const lines = [];
-  let left = 0;
-  let right = 0;
-  while (left < beforeLines.length || right < afterLines.length) {
-    if (left < beforeLines.length && right < afterLines.length && beforeLines[left] === afterLines[right]) {
-      lines.push(`  ${beforeLines[left]}`);
-      left += 1;
-      right += 1;
-    } else if (right < afterLines.length && (left === beforeLines.length || table[left][right + 1] >= table[left + 1][right])) {
-      lines.push(`+ ${afterLines[right]}`);
-      right += 1;
-    } else {
-      lines.push(`- ${beforeLines[left]}`);
-      left += 1;
+    const addition = additions.find(
+      (candidate) =>
+        !consumed.has(candidate) &&
+        singleChildWrapperPath(candidate.value, change.value, candidate.path),
+    );
+    if (!addition) {
+      return [change];
     }
-  }
-  return lines.length <= MAX_DIFF_LINES ? lines : null;
+    consumed.add(addition);
+    return [{
+      type: 'moved',
+      from: change.path,
+      path: singleChildWrapperPath(addition.value, change.value, addition.path),
+      value: change.value,
+    }];
+  }).filter((change) => !consumed.has(change));
 }
 
-function fencedDiff(lines) {
-  const source = lines.join('\n');
-  const longestBacktickRun = Math.max(
-    2,
-    ...[...source.matchAll(/`+/g)].map((match) => match[0].length),
-  );
-  const fence = '`'.repeat(longestBacktickRun + 1);
-  return `${fence}diff\n${source}\n${fence}`;
+function renderJsonChange(change) {
+  switch (change.type) {
+    case 'added':
+      return `- Added ${inlineCode(change.path)}: ${inlineCode(jsonValue(change.value))}`;
+    case 'removed':
+      return `- Removed ${inlineCode(change.path)}: ${inlineCode(jsonValue(change.value))}`;
+    case 'updated':
+      return `- Updated ${inlineCode(change.path)}: ${inlineCode(jsonValue(change.before))} -> ${inlineCode(jsonValue(change.after))}`;
+    case 'moved':
+      return `- Moved ${inlineCode(change.from)} -> ${inlineCode(change.path)}: ${inlineCode(jsonValue(change.value))}`;
+    case 'array-replaced':
+      return `- Replaced array ${inlineCode(change.path)} (${change.beforeLength ?? 'non-array'} items -> ${change.afterLength ?? 'non-array'} items)`;
+    default:
+      return '';
+  }
 }
 
 function renderBodyChanges(before, after) {
-  const previousJson = jsonBody(before);
-  const currentJson = jsonBody(after);
+  const previousJson = jsonBodyValue(before);
+  const currentJson = jsonBodyValue(after);
   if (previousJson !== null && currentJson !== null) {
-    if (previousJson.length > MAX_BODY_LENGTH || currentJson.length > MAX_BODY_LENGTH) {
-      return ['**Body**', '', '- JSON body changed but is too large to render safely.', ''];
-    }
-    const lines = lineDiff(previousJson, currentJson);
-    if (lines) {
-      return ['**Body (semantic JSON)**', '', fencedDiff(lines), ''];
-    }
-    return ['**Body**', '', '- JSON body changed but is too large to render safely.', ''];
+    const changes = compactMovedJsonValues(findJsonChanges(previousJson, currentJson));
+    const visible = changes.slice(0, MAX_JSON_CHANGES);
+    const omitted = changes.length - visible.length;
+    return [
+      `**Request body** (${changes.length} structural change${changes.length === 1 ? '' : 's'})`,
+      '',
+      ...visible.map(renderJsonChange),
+      ...(omitted ? [`- ${omitted} additional structural change${omitted === 1 ? '' : 's'} omitted.`] : []),
+      '',
+    ];
   }
 
   if ((before && before.mode === 'raw') || (after && after.mode === 'raw')) {
@@ -30656,12 +30759,21 @@ function renderAuthChanges(before, after) {
   return [...lines, ''];
 }
 
-function renderModifiedRequest(entry) {
+function renderModifiedRequest(entry, urlDisplay) {
   const fields = entry.fields || changedRequestFields(entry.before, entry.after);
+  const labels = {
+    auth: 'Authentication',
+    body: 'Request body',
+    header: 'Headers',
+    method: 'Method',
+    url: 'URL',
+  };
   const lines = [
-    `<details><summary>${inlineCode(entry.key)}: ${inlineCode(requestLabel(entry.before))} -> ${inlineCode(requestLabel(entry.after))}</summary>`,
+    `### ${requestLabel(entry.after, urlDisplay)} - ${requestName(entry.key)}`,
     '',
-    `Changed fields: ${fields.map(inlineCode).join(', ')}`,
+    `Changed: ${fields.map((field) => labels[field]).join(', ')}`,
+    '',
+    '<details><summary>View changed fields</summary>',
     '',
   ];
 
@@ -30669,7 +30781,7 @@ function renderModifiedRequest(entry) {
     lines.push('**Method**', '', `- ${inlineCode(entry.before.method)} -> ${inlineCode(entry.after.method)}`, '');
   }
   if (fields.includes('url')) {
-    lines.push(...renderUrlChanges(entry.before.url, entry.after.url));
+    lines.push(...renderUrlChanges(entry.before.url, entry.after.url, urlDisplay));
   }
   if (fields.includes('header')) {
     lines.push(...renderHeaderChanges(entry.before.header, entry.after.header));
@@ -30685,23 +30797,21 @@ function renderModifiedRequest(entry) {
   return lines.join('\n');
 }
 
-function modifiedLines(entries) {
+function modifiedLines(entries, urlDisplay) {
   if (entries.length === 0) {
     return '';
   }
 
   return [
-    `<details><summary>Modified (${entries.length})</summary>`,
+    `**Modified (${entries.length})**`,
     '',
-    ...entries.map(renderModifiedRequest),
-    '',
-    '</details>',
+    ...entries.map((entry) => renderModifiedRequest(entry, urlDisplay)),
     '',
   ].join('\n');
 }
 
-function renderFile(result) {
-  const title = `### \`${escapeMarkdown(result.path)}\``;
+function renderFile(result, urlDisplay) {
+  const title = `### ${inlineCode(result.path)}`;
   if (result.error) {
     return `${title}\n\n> Unable to compare this file: ${escapeMarkdown(result.error)}\n`;
   }
@@ -30714,11 +30824,11 @@ function renderFile(result) {
   return [
     title,
     '',
-    `**${total} semantic request change${total === 1 ? '' : 's'}**`,
+    `**${total} semantic request change${total === 1 ? '' : 's'}** (${result.changes.added.length} added, ${result.changes.removed.length} removed, ${result.changes.modified.length} modified)`,
     '',
-    requestLines('Added', result.changes.added),
-    requestLines('Removed', result.changes.removed),
-    modifiedLines(result.changes.modified),
+    requestLines('Added', result.changes.added, urlDisplay),
+    requestLines('Removed', result.changes.removed, urlDisplay),
+    modifiedLines(result.changes.modified, urlDisplay),
   ].join('\n');
 }
 
@@ -30730,14 +30840,15 @@ function truncate(markdown, limit = 60_000) {
   return `${markdown.slice(0, limit - 78)}\n\n> Report truncated because it exceeded the comment size limit.\n`;
 }
 
-function renderReport(results, marker) {
+function renderReport(results, marker, urlDisplay = 'path-only') {
+  const mode = normalizeUrlDisplay(urlDisplay);
   const body = [
     `<!-- ${marker} -->`,
     '## Postman collection diff',
     '',
     results.length === 0
       ? 'No changed Postman collection files matched the configured suffix.'
-      : results.map(renderFile).join('\n'),
+      : results.map((result) => renderFile(result, mode)).join('\n'),
   ].join('\n');
 
   return truncate(body);
@@ -30747,6 +30858,8 @@ module.exports = {
   escapeMarkdown,
   renderReport,
   renderModifiedRequest,
+  findJsonChanges,
+  normalizeUrlDisplay,
   safeUrl,
 };
 

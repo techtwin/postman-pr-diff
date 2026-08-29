@@ -13,6 +13,10 @@ inputs:
     description: Stable HTML marker used to find and update the pull request comment.
     required: false
     default: postman-pr-diff
+  url-display:
+    description: "URL detail level in reports: path-only (default), full, or hidden."
+    required: false
+    default: path-only
 runs:
   using: node20
   main: dist/index.js

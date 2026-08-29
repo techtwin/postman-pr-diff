@@ -32,7 +32,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\"annualMileage\":12000,\"vehicle\":\"sedan\"}",
+              "raw": "{\"vehicle\":{\"annualMileage\":12000,\"type\":\"sedan\"}}",
               "options": {"raw": {"language": "json"}}
             }
           }
