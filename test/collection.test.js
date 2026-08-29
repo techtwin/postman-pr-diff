@@ -97,6 +97,10 @@ test('renders structural body paths and safe field-level request changes', async
   assert.match(report, /<details><summary>View changed fields<\/summary>/);
   assert.match(report, /Removed `\$\.vehicle\.annualMileage`: `12000`/);
   assert.match(report, /Added `\$\.vehicle\.estimatedAnnualMileage`: `12000`/);
+  assert.match(report, /<details><summary>View exact body changes \(raw JSON diff\)<\/summary>/);
+  assert.match(report, /```diff/);
+  assert.match(report, /-\s+"annualMileage": 12000,/);
+  assert.match(report, /\+\s+"estimatedAnnualMileage": 12000,/);
   assert.doesNotMatch(report, /GET https:\/\/api\.example\.test\/users\/\{\{id\}\}\?include=vehicles&view=summary` -> `GET https:\/\/api\.example\.test\/users\/\{\{id\}\}\?include=vehicles&view=summary/);
   assert.match(report, /Changed `accept`: `application\/json` -> `application\/vnd\.example\+json`/);
   assert.match(report, /Added `x-request-id`: `request-123`/);
@@ -129,6 +133,22 @@ test('compacts a wrapped object into a structural move instead of a JSON wall', 
 
   assert.match(markdown, /### POST \/api\/books - Create books/);
   assert.match(markdown, /Moved `\$\.vehicle` -> `\$\.obj4\.vehicle`/);
+  assert.match(markdown, /<details><summary>View exact body changes \(raw JSON diff\)<\/summary>/);
+  assert.match(markdown, /```diff/);
+});
+
+test('omits oversized raw JSON diffs while preserving structural changes', () => {
+  const before = { mode: 'raw', raw: JSON.stringify({ description: 'before'.repeat(1_500) }) };
+  const after = { mode: 'raw', raw: JSON.stringify({ description: 'after'.repeat(1_500) }) };
+  const markdown = renderModifiedRequest({
+    key: 'Books / Update books',
+    before: { method: 'PUT', url: '/api/books', header: [], body: before, auth: null },
+    after: { method: 'PUT', url: '/api/books', header: [], body: after, auth: null },
+    fields: ['body'],
+  });
+
+  assert.match(markdown, /Updated `\$\.description`/);
+  assert.match(markdown, /Raw JSON diff omitted: .* exceeds the 12,000 character limit/);
   assert.doesNotMatch(markdown, /```diff/);
 });
 
