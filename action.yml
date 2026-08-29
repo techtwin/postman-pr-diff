@@ -14,7 +14,7 @@ inputs:
     required: false
     default: postman-pr-diff
   url-display:
-    description: URL detail level in reports: path-only (default), full, or hidden.
+    description: "URL detail level in reports: path-only (default), full, or hidden."
     required: false
     default: path-only
 runs:
