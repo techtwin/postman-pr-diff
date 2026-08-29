@@ -21,8 +21,17 @@
           "name": "Get user",
           "request": {
             "method": "GET",
-            "url": "https://api.example.test/users/{{id}}",
-            "header": [{"key": "Accept", "value": "application/vnd.example+json"}]
+            "url": "https://api.example.test/users/{{id}}?include=vehicles&view=summary",
+            "header": [
+              {"key": "Accept", "value": "application/vnd.example+json"},
+              {"key": "X-API-Key", "value": "after-secret"},
+              {"key": "X-Request-Id", "value": "request-123"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"estimatedAnnualMileage\":12000,\"vehicle\":\"sedan\"}",
+              "options": {"raw": {"language": "json"}}
+            }
           }
         },
         {

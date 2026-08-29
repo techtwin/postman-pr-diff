@@ -46,6 +46,10 @@ The included workflow first checks out the repository's default branch at a pinn
 
 The Action flattens collection folders into stable request paths and compares each request's method, URL, headers, body, and authentication. Object-key ordering is normalized so formatting-only JSON reordering does not cause a change. It reports added, removed, and modified requests; nested folders are included in the request path.
 
+The sticky comment keeps per-collection counts concise. Modified requests expand to show the changed fields: method; redacted URL path/query changes; added, removed, and changed headers; authentication type and configuration names; and a line-level unified `diff` for raw JSON request bodies. JSON bodies are parsed, key-sorted, pretty-printed, and redacted before rendering, so property renames and additions are visible without formatting noise. Raw non-JSON body content is intentionally omitted and marked as changed.
+
+Header values with sensitive names (for example, `Authorization`, `Cookie`, API keys, tokens, passwords, and secrets), sensitive query parameters, and authentication values are redacted. Long or large bodies are omitted rather than expanded, and the whole comment has a size limit.
+
 Request scripts, examples, collection metadata, descriptions, variable values, response examples, and array ordering are intentionally outside the semantic comparison. The Action accepts only Collection v2.1 documents and reports a per-file warning for invalid JSON or an unsupported schema.
 
 ## Development
