@@ -63,7 +63,7 @@ test('validates the Postman Collection v2.1 schema', () => {
   );
 });
 
-test('renders compact escaped Markdown with expandable request details', () => {
+test('renders readable file paths with valid expandable sections', () => {
   const report = renderReport(
     [{
       path: 'collections/a_[b].postman_collection.json',
@@ -78,11 +78,12 @@ test('renders compact escaped Markdown with expandable request details', () => {
   );
 
   assert.match(report, /<details><summary>Added \(1\)<\/summary>/);
-  assert.match(report, /a\\_\\\[b\\\]/);
+  assert.match(report, /`collections\/a_\[b\]\.postman_collection\.json`/);
+  assert.doesNotMatch(report, /a\\_\\\[b\\\]/);
   assert.equal(escapeMarkdown('*value*'), '\\*value\\*');
 });
 
-test('renders safe field-level body, header, and URL changes for modified requests', async () => {
+test('renders structural body paths and safe field-level request changes', async () => {
   const base = parseCollection(await fixture('base.postman_collection.json'), 'base');
   const head = parseCollection(await fixture('head.postman_collection.json'), 'head');
   const report = renderReport(
@@ -90,16 +91,44 @@ test('renders safe field-level body, header, and URL changes for modified reques
     'postman-pr-diff:test',
   );
 
-  assert.match(report, /<details><summary>Modified \(1\)<\/summary>/);
-  assert.match(report, /```diff/);
-  assert.match(report, /-   "annualMileage": 12000/);
-  assert.match(report, /\+   "estimatedAnnualMileage": 12000/);
+  assert.match(report, /\*\*Modified \(1\)\*\*/);
+  assert.match(report, /### GET https:\/\/api\.example\.test\/users\/\{\{id\}\}\?include=vehicles&view=summary - Get user/);
+  assert.match(report, /Changed: URL, Headers, Request body/);
+  assert.match(report, /<details><summary>View changed fields<\/summary>/);
+  assert.match(report, /Removed `\$\.vehicle\.annualMileage`: `12000`/);
+  assert.match(report, /Added `\$\.vehicle\.estimatedAnnualMileage`: `12000`/);
+  assert.doesNotMatch(report, /GET https:\/\/api\.example\.test\/users\/\{\{id\}\}\?include=vehicles&view=summary` -> `GET https:\/\/api\.example\.test\/users\/\{\{id\}\}\?include=vehicles&view=summary/);
   assert.match(report, /Changed `accept`: `application\/json` -> `application\/vnd\.example\+json`/);
   assert.match(report, /Added `x-request-id`: `request-123`/);
   assert.match(report, /Query added `include`: `vehicles`/);
   assert.match(report, /Query changed `view`: `full` -> `summary`/);
   assert.match(report, /Changed `x-api-key`: `\[redacted\]` -> `\[redacted\]`/);
   assert.doesNotMatch(report, /before-secret|after-secret/);
+});
+
+test('compacts a wrapped object into a structural move instead of a JSON wall', () => {
+  const markdown = renderModifiedRequest({
+    key: 'Books / Create books',
+    before: {
+      method: 'POST',
+      url: '{{url}}/api/books',
+      header: [],
+      body: { mode: 'raw', raw: '{"vehicle":{"annualMileage":12000}}' },
+      auth: null,
+    },
+    after: {
+      method: 'POST',
+      url: '{{url}}/api/books',
+      header: [],
+      body: { mode: 'raw', raw: '{"obj4":{"vehicle":{"annualMileage":12000}}}' },
+      auth: null,
+    },
+    fields: ['body'],
+  });
+
+  assert.match(markdown, /### POST \{\{url\}\}\/api\/books - Create books/);
+  assert.match(markdown, /Moved `\$\.vehicle` -> `\$\.obj4\.vehicle`/);
+  assert.doesNotMatch(markdown, /```diff/);
 });
 
 test('renders authentication types and configuration names without secret values', () => {
