@@ -4,7 +4,7 @@ const core = require('@actions/core');
 const github = require('@actions/github');
 const { parseCollection } = require('./collection');
 const { compareCollections, countChanges } = require('./diff');
-const { renderReport } = require('./render');
+const { normalizeUrlDisplay, renderReport } = require('./render');
 
 function isMatchingCollection(file, suffix) {
   return [file.filename, file.previous_filename].some(
@@ -111,6 +111,11 @@ async function run() {
   const token = core.getInput('github-token', { required: true });
   const suffix = core.getInput('collection-file-suffix') || '.postman_collection.json';
   const markerName = core.getInput('comment-marker') || 'postman-pr-diff';
+  const requestedUrlDisplay = core.getInput('url-display') || 'path-only';
+  const urlDisplay = normalizeUrlDisplay(requestedUrlDisplay);
+  if (urlDisplay !== requestedUrlDisplay) {
+    core.warning(`Unknown url-display "${requestedUrlDisplay}"; using path-only.`);
+  }
   const marker = `${markerName}:${github.context.repo.owner}/${github.context.repo.repo}:${pullRequest.number}`;
   const octokit = github.getOctokit(token);
   const repository = github.context.repo;
@@ -150,7 +155,7 @@ async function run() {
         currentPull.data.head.sha,
       )),
   );
-  const report = renderReport(results, marker);
+  const report = renderReport(results, marker, urlDisplay);
 
   try {
     await publishComment(octokit, repository, pullRequest.number, marker, report);

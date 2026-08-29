@@ -6,6 +6,7 @@ const { changedRequestFields, countChanges } = require('./diff');
 const MAX_INLINE_LENGTH = 320;
 const MAX_JSON_CHANGES = 60;
 const SENSITIVE_NAME = /(?:authorization|cookie|token|secret|password|api[-_]?key|apikey|access[-_]?key|private[-_]?key|^key$)/i;
+const URL_DISPLAY_MODES = new Set(['full', 'path-only', 'hidden']);
 
 function escapeMarkdown(value) {
   return String(value).replace(/([\\`*_[\]{}()#+\-.!|<>])/g, '\\$1');
@@ -77,7 +78,10 @@ function decodeURIComponentSafely(value) {
 function urlParts(url) {
   const raw = rawUrl(url);
   const [withoutFragment] = raw.split('#', 1);
-  const [path, query = ''] = withoutFragment.split('?', 2);
+  const [location, query = ''] = withoutFragment.split('?', 2);
+  const absolute = location.match(/^([a-z][a-z0-9+.-]*:\/\/[^/?#]+)(\/.*)?$/i);
+  const templated = location.match(/^\{\{[^}]+\}\}(\/.*)?$/);
+  const path = absolute?.[2] || templated?.[1] || location || '/';
   const queryEntries = query
     .split('&')
     .filter(Boolean)
@@ -93,30 +97,45 @@ function urlParts(url) {
       return keyOrder || left.value.localeCompare(right.value);
     });
 
-  return { path, queryEntries };
+  return { location, path, queryEntries };
 }
 
 function safeUrl(url) {
   const parts = urlParts(url);
-  const safePath = parts.path.replace(
+  const safeLocation = parts.location.replace(
     /^([a-z][a-z0-9+.-]*:\/\/)[^/@\s]+@/i,
     '$1[redacted]@',
   );
   const query = parts.queryEntries
     .map(({ key, value }) => `${key}=${isSensitiveName(key) ? '[redacted]' : value}`)
     .join('&');
-  return query ? `${safePath}?${query}` : safePath;
+  return query ? `${safeLocation}?${query}` : safeLocation;
 }
 
-function requestLabel(request) {
-  return `${request.method} ${safeUrl(request.url)}`;
+function normalizeUrlDisplay(value) {
+  return URL_DISPLAY_MODES.has(value) ? value : 'path-only';
+}
+
+function displayUrl(url, mode) {
+  switch (normalizeUrlDisplay(mode)) {
+    case 'full':
+      return safeUrl(url);
+    case 'hidden':
+      return '[URL hidden]';
+    default:
+      return urlParts(url).path;
+  }
+}
+
+function requestLabel(request, urlDisplay) {
+  return `${request.method} ${displayUrl(request.url, urlDisplay)}`;
 }
 
 function requestName(key) {
   return String(key).split(' / ').at(-1);
 }
 
-function requestLines(label, entries) {
+function requestLines(label, entries, urlDisplay) {
   if (entries.length === 0) {
     return '';
   }
@@ -124,7 +143,7 @@ function requestLines(label, entries) {
   return [
     `<details><summary>${label} (${entries.length})</summary>`,
     '',
-    ...entries.map((entry) => `- ${inlineCode(entry.key)}: ${inlineCode(requestLabel(entry.after || entry.before))}`),
+    ...entries.map((entry) => `- ${inlineCode(entry.key)}: ${inlineCode(requestLabel(entry.after || entry.before, urlDisplay))}`),
     '',
     '</details>',
     '',
@@ -184,14 +203,19 @@ function queryMap(entries) {
   return values;
 }
 
-function renderUrlChanges(before, after) {
+function renderUrlChanges(before, after, urlDisplay) {
+  const mode = normalizeUrlDisplay(urlDisplay);
+  if (mode === 'hidden') {
+    return ['**URL**', '', '- URL changed; URL details are hidden by configuration.', ''];
+  }
+
   const previous = urlParts(before);
   const current = urlParts(after);
-  const lines = [
-    '**URL**',
-    '',
-    `- Value: ${inlineCode(safeUrl(before))} -> ${inlineCode(safeUrl(after))}`,
-  ];
+  const lines = ['**URL**', ''];
+
+  if (mode === 'full') {
+    lines.push(`- Value: ${inlineCode(safeUrl(before))} -> ${inlineCode(safeUrl(after))}`);
+  }
 
   if (previous.path !== current.path) {
     lines.push(`- Path: ${inlineCode(previous.path)} -> ${inlineCode(current.path)}`);
@@ -205,11 +229,17 @@ function renderUrlChanges(before, after) {
     const oldValues = previousQuery.get(name);
     const newValues = currentQuery.get(name);
     if (!oldValues) {
-      lines.push(`- Query added ${inlineCode(name)}: ${inlineCode(newValues.join(', '))}`);
+      lines.push(mode === 'full'
+        ? `- Query added ${inlineCode(name)}: ${inlineCode(newValues.join(', '))}`
+        : `- Query added ${inlineCode(name)}`);
     } else if (!newValues) {
-      lines.push(`- Query removed ${inlineCode(name)}: ${inlineCode(oldValues.join(', '))}`);
+      lines.push(mode === 'full'
+        ? `- Query removed ${inlineCode(name)}: ${inlineCode(oldValues.join(', '))}`
+        : `- Query removed ${inlineCode(name)}`);
     } else if (canonicalRequest(oldValues) !== canonicalRequest(newValues)) {
-      lines.push(`- Query changed ${inlineCode(name)}: ${inlineCode(oldValues.join(', '))} -> ${inlineCode(newValues.join(', '))}`);
+      lines.push(mode === 'full'
+        ? `- Query changed ${inlineCode(name)}: ${inlineCode(oldValues.join(', '))} -> ${inlineCode(newValues.join(', '))}`
+        : `- Query changed ${inlineCode(name)}`);
     }
   }
 
@@ -404,7 +434,7 @@ function renderAuthChanges(before, after) {
   return [...lines, ''];
 }
 
-function renderModifiedRequest(entry) {
+function renderModifiedRequest(entry, urlDisplay) {
   const fields = entry.fields || changedRequestFields(entry.before, entry.after);
   const labels = {
     auth: 'Authentication',
@@ -414,7 +444,7 @@ function renderModifiedRequest(entry) {
     url: 'URL',
   };
   const lines = [
-    `### ${requestLabel(entry.after)} - ${requestName(entry.key)}`,
+    `### ${requestLabel(entry.after, urlDisplay)} - ${requestName(entry.key)}`,
     '',
     `Changed: ${fields.map((field) => labels[field]).join(', ')}`,
     '',
@@ -426,7 +456,7 @@ function renderModifiedRequest(entry) {
     lines.push('**Method**', '', `- ${inlineCode(entry.before.method)} -> ${inlineCode(entry.after.method)}`, '');
   }
   if (fields.includes('url')) {
-    lines.push(...renderUrlChanges(entry.before.url, entry.after.url));
+    lines.push(...renderUrlChanges(entry.before.url, entry.after.url, urlDisplay));
   }
   if (fields.includes('header')) {
     lines.push(...renderHeaderChanges(entry.before.header, entry.after.header));
@@ -442,7 +472,7 @@ function renderModifiedRequest(entry) {
   return lines.join('\n');
 }
 
-function modifiedLines(entries) {
+function modifiedLines(entries, urlDisplay) {
   if (entries.length === 0) {
     return '';
   }
@@ -450,12 +480,12 @@ function modifiedLines(entries) {
   return [
     `**Modified (${entries.length})**`,
     '',
-    ...entries.map(renderModifiedRequest),
+    ...entries.map((entry) => renderModifiedRequest(entry, urlDisplay)),
     '',
   ].join('\n');
 }
 
-function renderFile(result) {
+function renderFile(result, urlDisplay) {
   const title = `### ${inlineCode(result.path)}`;
   if (result.error) {
     return `${title}\n\n> Unable to compare this file: ${escapeMarkdown(result.error)}\n`;
@@ -471,9 +501,9 @@ function renderFile(result) {
     '',
     `**${total} semantic request change${total === 1 ? '' : 's'}** (${result.changes.added.length} added, ${result.changes.removed.length} removed, ${result.changes.modified.length} modified)`,
     '',
-    requestLines('Added', result.changes.added),
-    requestLines('Removed', result.changes.removed),
-    modifiedLines(result.changes.modified),
+    requestLines('Added', result.changes.added, urlDisplay),
+    requestLines('Removed', result.changes.removed, urlDisplay),
+    modifiedLines(result.changes.modified, urlDisplay),
   ].join('\n');
 }
 
@@ -485,14 +515,15 @@ function truncate(markdown, limit = 60_000) {
   return `${markdown.slice(0, limit - 78)}\n\n> Report truncated because it exceeded the comment size limit.\n`;
 }
 
-function renderReport(results, marker) {
+function renderReport(results, marker, urlDisplay = 'path-only') {
+  const mode = normalizeUrlDisplay(urlDisplay);
   const body = [
     `<!-- ${marker} -->`,
     '## Postman collection diff',
     '',
     results.length === 0
       ? 'No changed Postman collection files matched the configured suffix.'
-      : results.map(renderFile).join('\n'),
+      : results.map((result) => renderFile(result, mode)).join('\n'),
   ].join('\n');
 
   return truncate(body);
@@ -503,5 +534,6 @@ module.exports = {
   renderReport,
   renderModifiedRequest,
   findJsonChanges,
+  normalizeUrlDisplay,
   safeUrl,
 };

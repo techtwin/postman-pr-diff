@@ -92,7 +92,7 @@ test('renders structural body paths and safe field-level request changes', async
   );
 
   assert.match(report, /\*\*Modified \(1\)\*\*/);
-  assert.match(report, /### GET https:\/\/api\.example\.test\/users\/\{\{id\}\}\?include=vehicles&view=summary - Get user/);
+  assert.match(report, /### GET \/users\/\{\{id\}\} - Get user/);
   assert.match(report, /Changed: URL, Headers, Request body/);
   assert.match(report, /<details><summary>View changed fields<\/summary>/);
   assert.match(report, /Removed `\$\.vehicle\.annualMileage`: `12000`/);
@@ -100,8 +100,9 @@ test('renders structural body paths and safe field-level request changes', async
   assert.doesNotMatch(report, /GET https:\/\/api\.example\.test\/users\/\{\{id\}\}\?include=vehicles&view=summary` -> `GET https:\/\/api\.example\.test\/users\/\{\{id\}\}\?include=vehicles&view=summary/);
   assert.match(report, /Changed `accept`: `application\/json` -> `application\/vnd\.example\+json`/);
   assert.match(report, /Added `x-request-id`: `request-123`/);
-  assert.match(report, /Query added `include`: `vehicles`/);
-  assert.match(report, /Query changed `view`: `full` -> `summary`/);
+  assert.match(report, /Query added `include`/);
+  assert.match(report, /Query changed `view`/);
+  assert.doesNotMatch(report, /api\.example\.test|include=vehicles|view=summary/);
   assert.match(report, /Changed `x-api-key`: `\[redacted\]` -> `\[redacted\]`/);
   assert.doesNotMatch(report, /before-secret|after-secret/);
 });
@@ -126,7 +127,7 @@ test('compacts a wrapped object into a structural move instead of a JSON wall', 
     fields: ['body'],
   });
 
-  assert.match(markdown, /### POST \{\{url\}\}\/api\/books - Create books/);
+  assert.match(markdown, /### POST \/api\/books - Create books/);
   assert.match(markdown, /Moved `\$\.vehicle` -> `\$\.obj4\.vehicle`/);
   assert.doesNotMatch(markdown, /```diff/);
 });
@@ -154,4 +155,26 @@ test('renders authentication types and configuration names without secret values
   assert.match(markdown, /Type: `bearer` -> `apikey`/);
   assert.match(markdown, /Configuration changed: `bearer\.token` -> `apikey\.value` \(values redacted\)/);
   assert.doesNotMatch(markdown, /before-secret|after-secret/);
+});
+
+test('uses explicit full and hidden URL display modes only when configured', () => {
+  const result = [{
+    path: 'collections/example.postman_collection.json',
+    changes: {
+      added: [{
+        key: 'Books / List books',
+        after: { method: 'GET', url: 'https://internal.example.test/api/books?region=us-east-1' },
+      }],
+      removed: [],
+      modified: [],
+      unchanged: [],
+    },
+  }];
+
+  const full = renderReport(result, 'postman-pr-diff:test', 'full');
+  const hidden = renderReport(result, 'postman-pr-diff:test', 'hidden');
+
+  assert.match(full, /https:\/\/internal\.example\.test\/api\/books\?region=us-east-1/);
+  assert.match(hidden, /GET \[URL hidden\]/);
+  assert.doesNotMatch(hidden, /internal\.example\.test|us-east-1/);
 });
