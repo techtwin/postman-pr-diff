@@ -2,6 +2,14 @@
 
 const { canonicalRequest } = require('./collection');
 
+const REQUEST_FIELDS = ['method', 'url', 'header', 'body', 'auth'];
+
+function changedRequestFields(before, after) {
+  return REQUEST_FIELDS.filter(
+    (field) => canonicalRequest(before[field]) !== canonicalRequest(after[field]),
+  );
+}
+
 function compareCollections(base, head) {
   const keys = new Set([...base.requests.keys(), ...head.requests.keys()]);
   const changes = {
@@ -20,7 +28,12 @@ function compareCollections(base, head) {
     } else if (!after) {
       changes.removed.push({ key, before });
     } else if (canonicalRequest(before) !== canonicalRequest(after)) {
-      changes.modified.push({ key, before, after });
+      changes.modified.push({
+        key,
+        before,
+        after,
+        fields: changedRequestFields(before, after),
+      });
     } else {
       changes.unchanged.push({ key, after });
     }
@@ -33,4 +46,4 @@ function countChanges(changes) {
   return changes.added.length + changes.removed.length + changes.modified.length;
 }
 
-module.exports = { compareCollections, countChanges };
+module.exports = { changedRequestFields, compareCollections, countChanges };
