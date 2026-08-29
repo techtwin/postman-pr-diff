@@ -30325,11 +30325,13 @@ module.exports = {
 "use strict";
 
 
-const { canonicalRequest } = __nccwpck_require__(5405);
+const { canonicalRequest, stableValue } = __nccwpck_require__(5405);
 const { changedRequestFields, countChanges } = __nccwpck_require__(9898);
 
 const MAX_INLINE_LENGTH = 320;
 const MAX_JSON_CHANGES = 60;
+const MAX_RAW_JSON_CHARACTERS = 12_000;
+const MAX_RAW_DIFF_LINES = 180;
 const SENSITIVE_NAME = /(?:authorization|cookie|token|secret|password|api[-_]?key|apikey|access[-_]?key|private[-_]?key|^key$)/i;
 const URL_DISPLAY_MODES = new Set(['full', 'path-only', 'hidden']);
 
@@ -30572,7 +30574,7 @@ function renderUrlChanges(before, after, urlDisplay) {
 }
 
 function canonicalJson(value) {
-  return JSON.stringify(redactValue(value), null, 2);
+  return JSON.stringify(stableValue(redactValue(value)), null, 2);
 }
 
 function jsonBodyValue(body) {
@@ -30595,7 +30597,7 @@ function jsonPath(path, key) {
 }
 
 function stableJson(value) {
-  return JSON.stringify(redactValue(value));
+  return JSON.stringify(stableValue(redactValue(value)));
 }
 
 function jsonValue(value) {
@@ -30699,6 +30701,92 @@ function renderJsonChange(change) {
   }
 }
 
+function lineDiff(before, after) {
+  const beforeLines = before.split('\n');
+  const afterLines = after.split('\n');
+  const table = Array.from(
+    { length: beforeLines.length + 1 },
+    () => Array(afterLines.length + 1).fill(0),
+  );
+
+  for (let left = beforeLines.length - 1; left >= 0; left -= 1) {
+    for (let right = afterLines.length - 1; right >= 0; right -= 1) {
+      table[left][right] = beforeLines[left] === afterLines[right]
+        ? table[left + 1][right + 1] + 1
+        : Math.max(table[left + 1][right], table[left][right + 1]);
+    }
+  }
+
+  const lines = [];
+  let left = 0;
+  let right = 0;
+  while (left < beforeLines.length || right < afterLines.length) {
+    if (left < beforeLines.length && right < afterLines.length && beforeLines[left] === afterLines[right]) {
+      lines.push(`  ${beforeLines[left]}`);
+      left += 1;
+      right += 1;
+    } else if (
+      left < beforeLines.length &&
+      (right === afterLines.length || table[left + 1][right] >= table[left][right + 1])
+    ) {
+      lines.push(`- ${beforeLines[left]}`);
+      left += 1;
+    } else {
+      lines.push(`+ ${afterLines[right]}`);
+      right += 1;
+    }
+  }
+  return lines;
+}
+
+function fencedDiff(lines) {
+  const source = lines.join('\n');
+  const longestBacktickRun = Math.max(
+    2,
+    ...[...source.matchAll(/`+/g)].map((match) => match[0].length),
+  );
+  const fence = '`'.repeat(longestBacktickRun + 1);
+  return `${fence}diff\n${source}\n${fence}`;
+}
+
+function renderRawJsonDiff(before, after) {
+  const previous = canonicalJson(before);
+  const current = canonicalJson(after);
+  const totalCharacters = previous.length + current.length;
+
+  if (totalCharacters > MAX_RAW_JSON_CHARACTERS) {
+    return [
+      '<details><summary>View exact body changes (raw JSON diff)</summary>',
+      '',
+      `Raw JSON diff omitted: ${totalCharacters.toLocaleString()} characters exceeds the ${MAX_RAW_JSON_CHARACTERS.toLocaleString()} character limit.`,
+      '',
+      '</details>',
+      '',
+    ];
+  }
+
+  const lines = lineDiff(previous, current);
+  if (lines.length > MAX_RAW_DIFF_LINES) {
+    return [
+      '<details><summary>View exact body changes (raw JSON diff)</summary>',
+      '',
+      `Raw JSON diff omitted: ${lines.length} lines exceeds the ${MAX_RAW_DIFF_LINES} line limit. The structural summary above remains complete up to its own limit.`,
+      '',
+      '</details>',
+      '',
+    ];
+  }
+
+  return [
+    '<details><summary>View exact body changes (raw JSON diff)</summary>',
+    '',
+    fencedDiff(lines),
+    '',
+    '</details>',
+    '',
+  ];
+}
+
 function renderBodyChanges(before, after) {
   const previousJson = jsonBodyValue(before);
   const currentJson = jsonBodyValue(after);
@@ -30712,6 +30800,7 @@ function renderBodyChanges(before, after) {
       ...visible.map(renderJsonChange),
       ...(omitted ? [`- ${omitted} additional structural change${omitted === 1 ? '' : 's'} omitted.`] : []),
       '',
+      ...renderRawJsonDiff(previousJson, currentJson),
     ];
   }
 
