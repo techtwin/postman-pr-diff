@@ -30092,19 +30092,22 @@ function contextualEdgeDiff(before, after) {
   const firstAfterEnd = Math.min(afterEnd, prefix + EDGE_DIFF_CHANGE_LINES);
   const lastBeforeStart = Math.max(prefix, beforeEnd - EDGE_DIFF_CHANGE_LINES);
   const lastAfterStart = Math.max(prefix, afterEnd - EDGE_DIFF_CHANGE_LINES);
+  const overlaps = lastBeforeStart < firstBeforeEnd || lastAfterStart < firstAfterEnd;
   const output = [
     ...before.slice(Math.max(0, prefix - DIFF_CONTEXT_LINES), prefix).map((line) => `  ${line}`),
-    ...before.slice(prefix, firstBeforeEnd).map((line) => `- ${line}`),
-    ...after.slice(prefix, firstAfterEnd).map((line) => `+ ${line}`),
+    ...before.slice(prefix, overlaps ? beforeEnd : firstBeforeEnd).map((line) => `- ${line}`),
+    ...after.slice(prefix, overlaps ? afterEnd : firstAfterEnd).map((line) => `+ ${line}`),
   ];
-  const omitted = Math.max(0, (lastBeforeStart - firstBeforeEnd) + (lastAfterStart - firstAfterEnd));
+  const omitted = overlaps
+    ? 0
+    : Math.max(0, (lastBeforeStart - firstBeforeEnd) + (lastAfterStart - firstAfterEnd));
   if (omitted > 0) {
     output.push(`  ... ${omitted} changed-region lines omitted ...`);
   }
-  if (lastBeforeStart >= firstBeforeEnd) {
+  if (!overlaps && lastBeforeStart >= firstBeforeEnd) {
     output.push(...before.slice(lastBeforeStart, beforeEnd).map((line) => `- ${line}`));
   }
-  if (lastAfterStart >= firstAfterEnd) {
+  if (!overlaps && lastAfterStart >= firstAfterEnd) {
     output.push(...after.slice(lastAfterStart, afterEnd).map((line) => `+ ${line}`));
   }
   output.push(
@@ -30151,7 +30154,7 @@ function contextualDiff(lines) {
 
   for (const hunk of selected) {
     if (previousEnd >= 0 && hunk.start > previousEnd + 1) {
-      output.push(`  ... ${hunk.start - previousEnd - 1} unchanged lines omitted ...`);
+      output.push(`  ... ${hunk.start - previousEnd - 1} diff lines omitted ...`);
     }
     const hunkLines = lines
       .slice(hunk.start, hunk.end + 1)

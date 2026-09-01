@@ -190,6 +190,25 @@ test('does not duplicate one-sided additions in a bounded JSON preview', () => {
   assert.equal(added.length, 1);
 });
 
+test('keeps overlapping edge previews complete for large JSON diffs', () => {
+  const beforeValue = Object.fromEntries(
+    Array.from({ length: 15 }, (_, index) => [`a${String(index).padStart(2, '0')}`, `before-${'x'.repeat(900)}`]),
+  );
+  const afterValue = Object.fromEntries(
+    Array.from({ length: 15 }, (_, index) => [`a${String(index).padStart(2, '0')}`, `after-${'y'.repeat(900)}`]),
+  );
+  const markdown = renderModifiedRequest({
+    key: 'Books / Update range',
+    before: { method: 'PUT', url: '/books', header: [], body: { mode: 'raw', raw: JSON.stringify(beforeValue) }, auth: null },
+    after: { method: 'PUT', url: '/books', header: [], body: { mode: 'raw', raw: JSON.stringify(afterValue) }, auth: null },
+    fields: ['body'],
+  });
+
+  assert.match(markdown, /-\s+"a14": "before-/);
+  assert.match(markdown, /\+\s+"a14": "after-/);
+  assert.doesNotMatch(markdown, /changed-region lines omitted/);
+});
+
 test('renders authentication types and configuration names without secret values', () => {
   const markdown = renderModifiedRequest({
     key: 'Auth / Token',
