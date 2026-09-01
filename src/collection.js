@@ -1,20 +1,7 @@
 'use strict';
 
-function stableValue(value) {
-  if (Array.isArray(value)) {
-    return value.map(stableValue);
-  }
-
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.keys(value)
-        .sort((left, right) => left.localeCompare(right))
-        .map((key) => [key, stableValue(value[key])]),
-    );
-  }
-
-  return value;
-}
+const { normalizeBody, normalizeEvents } = require('./formats');
+const { stableValue } = require('./stable');
 
 function normalizeHeaders(headers) {
   if (!Array.isArray(headers)) {
@@ -33,27 +20,7 @@ function normalizeHeaders(headers) {
     });
 }
 
-function normalizeBody(body) {
-  if (!body || typeof body !== 'object') {
-    return body || null;
-  }
-
-  const normalized = stableValue(body);
-  if (normalized.mode !== 'raw' || typeof normalized.raw !== 'string') {
-    return normalized;
-  }
-
-  try {
-    return {
-      ...normalized,
-      raw: JSON.stringify(stableValue(JSON.parse(normalized.raw))),
-    };
-  } catch {
-    return normalized;
-  }
-}
-
-function normalizeRequest(request) {
+function normalizeRequest(request, events) {
   const source = request && typeof request === 'object' ? request : {};
 
   return stableValue({
@@ -61,6 +28,7 @@ function normalizeRequest(request) {
     url: source.url || '',
     header: normalizeHeaders(source.header),
     body: normalizeBody(source.body),
+    events: normalizeEvents(events),
     auth: source.auth || null,
   });
 }
@@ -69,12 +37,12 @@ function requestKey(path) {
   return path.map((part) => String(part || 'Untitled request')).join(' / ');
 }
 
-function addRequest(requests, duplicateCounts, path, request) {
+function addRequest(requests, duplicateCounts, path, request, events) {
   const key = requestKey(path);
   const count = duplicateCounts.get(key) || 0;
   const uniqueKey = count === 0 ? key : `${key} (${count + 1})`;
   duplicateCounts.set(key, count + 1);
-  requests.set(uniqueKey, normalizeRequest(request));
+  requests.set(uniqueKey, normalizeRequest(request, events));
 
   return uniqueKey;
 }
@@ -90,7 +58,7 @@ function collectItems(items, path, requests, duplicateCounts) {
     }
 
     if (item.request) {
-      addRequest(requests, duplicateCounts, [...path, item.name], item.request);
+      addRequest(requests, duplicateCounts, [...path, item.name], item.request, item.event);
     } else if (Array.isArray(item.item)) {
       collectItems(item.item, [...path, item.name], requests, duplicateCounts);
     }
@@ -117,6 +85,7 @@ function parseCollection(content, fileName = 'collection') {
 
   return {
     name: String(collection.info.name || fileName),
+    events: normalizeEvents(collection.event),
     requests,
   };
 }

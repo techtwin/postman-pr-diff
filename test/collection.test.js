@@ -198,3 +198,73 @@ test('uses explicit full and hidden URL display modes only when configured', () 
   assert.match(hidden, /GET \[URL hidden\]/);
   assert.doesNotMatch(hidden, /internal\.example\.test|us-east-1/);
 });
+
+test('renders supported Postman body formats and scripts without leaking private content', async () => {
+  const base = parseCollection(await fixture('multiformat-base.postman_collection.json'), 'base');
+  const head = parseCollection(await fixture('multiformat-head.postman_collection.json'), 'head');
+  const changes = compareCollections(base, head);
+  const report = renderReport([{ path: 'formats.postman_collection.json', changes }], 'postman-pr-diff:test');
+
+  assert.equal(changes.modified.length, 6);
+  assert.match(report, /Request body \(XML\)/);
+  assert.match(report, /Updated `\$\.book\["\@id"\]`/);
+  assert.match(report, /Request body \(URL-encoded\)/);
+  assert.match(report, /Changed `enabled`: `old` -> `new`/);
+  assert.doesNotMatch(report, /ignored/);
+  assert.match(report, /Request body \(form-data\)/);
+  assert.match(report, /file: before\.jpg/);
+  assert.doesNotMatch(report, /\/private\//);
+  assert.match(report, /Request body \(GraphQL\)/);
+  assert.match(report, /GraphQL query/);
+  assert.match(report, /Request body \(javascript\)/);
+  assert.match(report, /Request body \(file\/binary\)/);
+  assert.match(report, /Collection scripts/);
+  assert.match(report, /Request scripts/);
+  assert.doesNotMatch(report, /before-secret|after-secret/);
+});
+
+test('reports malformed and oversized XML safely without parsing external entities', () => {
+  const malformed = renderModifiedRequest({
+    key: 'XML / Malformed',
+    before: { method: 'POST', url: '/xml', header: [], body: { mode: 'raw', raw: '<book>', options: { raw: { language: 'xml' } } }, auth: null, events: [] },
+    after: { method: 'POST', url: '/xml', header: [], body: { mode: 'raw', raw: '<book><x /></book>', options: { raw: { language: 'xml' } } }, auth: null, events: [] },
+    fields: ['body'],
+  });
+  const dtd = renderModifiedRequest({
+    key: 'XML / DTD',
+    before: { method: 'POST', url: '/xml', header: [], body: { mode: 'raw', raw: '<!DOCTYPE x><x />', options: { raw: { language: 'xml' } } }, auth: null, events: [] },
+    after: { method: 'POST', url: '/xml', header: [], body: { mode: 'raw', raw: '<x />', options: { raw: { language: 'xml' } } }, auth: null, events: [] },
+    fields: ['body'],
+  });
+
+  assert.match(malformed, /Structural XML diff unavailable/);
+  assert.match(dtd, /prohibited DTD or entity declaration/);
+  assert.doesNotMatch(dtd, /<!DOCTYPE/);
+});
+
+test('applies XML depth and size limits and renders HTML as bounded raw text', () => {
+  const deeplyNested = `${'<node>'.repeat(41)}${'</node>'.repeat(41)}`;
+  const deep = renderModifiedRequest({
+    key: 'XML / Deep',
+    before: { method: 'POST', url: '/xml', header: [], body: { mode: 'raw', raw: deeplyNested, options: { raw: { language: 'xml' } } }, auth: null, events: [] },
+    after: { method: 'POST', url: '/xml', header: [], body: { mode: 'raw', raw: '<node />', options: { raw: { language: 'xml' } } }, auth: null, events: [] },
+    fields: ['body'],
+  });
+  const oversized = renderModifiedRequest({
+    key: 'XML / Large',
+    before: { method: 'POST', url: '/xml', header: [], body: { mode: 'raw', raw: `<node>${'x'.repeat(100_001)}</node>`, options: { raw: { language: 'xml' } } }, auth: null, events: [] },
+    after: { method: 'POST', url: '/xml', header: [], body: { mode: 'raw', raw: '<node />', options: { raw: { language: 'xml' } } }, auth: null, events: [] },
+    fields: ['body'],
+  });
+  const html = renderModifiedRequest({
+    key: 'Raw / HTML',
+    before: { method: 'POST', url: '/html', header: [], body: { mode: 'raw', raw: '<p>old</p>', options: { raw: { language: 'html' } } }, auth: null, events: [] },
+    after: { method: 'POST', url: '/html', header: [], body: { mode: 'raw', raw: '<p>new</p>', options: { raw: { language: 'html' } } }, auth: null, events: [] },
+    fields: ['body'],
+  });
+
+  assert.match(deep, /depth or 5,000 node limit/);
+  assert.match(oversized, /100,000 character limit/);
+  assert.match(html, /Request body \(html\)/);
+  assert.match(html, /```diff/);
+});

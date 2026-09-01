@@ -53,6 +53,20 @@ Raw JSON request bodies are parsed and compared structurally. The report uses re
 
 Each changed JSON body also includes an expandable `View exact body changes (raw JSON diff)` section. It contains a red/green GitHub `diff` block generated from redacted, key-sorted, pretty JSON so simple property additions and removals remain easy to inspect. The raw diff is omitted with an explicit size or line-count notice when it exceeds the safety cap; the concise structural summary remains the primary view. Raw non-JSON body content is intentionally omitted and marked as changed.
 
+## Supported body and script formats
+
+| Postman body mode | Semantic report |
+| --- | --- |
+| `raw` JSON | Structural JSON paths plus bounded, expandable exact diff. |
+| `raw` XML | Element, attribute, and text changes after parsing without DTDs, entities, or network resolution. Malformed, unsafe, deep, or oversized XML emits an omission notice. |
+| `raw` HTML, JavaScript, text, and other | Redacted, bounded expandable text diff. |
+| `urlencoded` | Enabled fields only, sorted by name. |
+| `formdata` | Field changes; file fields show filename metadata only, never file content or source paths. |
+| `graphql` | Query diff plus canonical JSON variables comparison. |
+| `file` / `binary` | Filename metadata only. |
+
+Collection and request `prerequest` and `test` events are compared deterministically and rendered as collapsed, redacted, capped script diffs. Scripts, entities, templates, and file content are never executed, interpolated, or fetched.
+
 Header values with sensitive names (for example, `Authorization`, `Cookie`, API keys, tokens, passwords, and secrets), sensitive query parameters, and authentication values are redacted. Long or large bodies are omitted rather than expanded, and the whole comment has a size limit.
 
 Request scripts, examples, collection metadata, descriptions, variable values, response examples, and array ordering are intentionally outside the semantic comparison. The Action accepts only Collection v2.1 documents and reports a per-file warning for invalid JSON or an unsupported schema.
