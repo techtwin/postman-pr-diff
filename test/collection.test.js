@@ -169,8 +169,10 @@ test('keeps first and last changed lines when a multiline JSON diff exceeds its 
 
   assert.match(markdown, /Raw JSON diff truncated/);
   assert.match(markdown, /-\s+"field0": "before-0"/);
+  assert.match(markdown, /\+\s+"field0": "after-0"/);
+  assert.match(markdown, /-\s+"field99": "before-99"/);
   assert.match(markdown, /\+\s+"field99": "after-99"/);
-  assert.match(markdown, /hunk lines omitted|diff lines omitted/);
+  assert.match(markdown, /changed-region lines omitted|hunk lines omitted|diff lines omitted/);
 });
 
 test('renders authentication types and configuration names without secret values', () => {

@@ -19,7 +19,8 @@ const MAX_RAW_DIFF_LINES = 400;
 const MAX_CONTEXT_DIFF_LINES = 120;
 const MAX_CONTEXT_DIFF_CHARACTERS = 12_000;
 const DIFF_CONTEXT_LINES = 3;
-const MAX_DIFF_LINE_CHARACTERS = 400;
+const MAX_DIFF_LINE_CHARACTERS = 240;
+const EDGE_DIFF_CHANGE_LINES = 10;
 
 function canonicalJson(value) {
   return JSON.stringify(stableValue(redactValue(value)), null, 2);
@@ -118,13 +119,15 @@ function renderRawJsonDiff(before, after) {
   const requiresContext = totalCharacters > MAX_RAW_JSON_CHARACTERS
     || previousLines.length > MAX_RAW_DIFF_LINES
     || currentLines.length > MAX_RAW_DIFF_LINES;
-  const lines = requiresContext
-    ? edgeDiff(previousLines, currentLines)
-    : lineDiff(previous, current);
+  const lines = requiresContext ? null : lineDiff(previous, current);
   const exceedsLimit = requiresContext
     || lines.length > MAX_RAW_DIFF_LINES
     || lines.join('\n').length > MAX_CONTEXT_DIFF_CHARACTERS;
-  const display = exceedsLimit ? contextualDiff(lines) : lines;
+  const display = requiresContext
+    ? contextualEdgeDiff(previousLines, currentLines)
+    : exceedsLimit
+      ? contextualDiff(lines)
+      : lines;
   const note = exceedsLimit
     ? `Raw JSON diff truncated: ${previousLines.length + currentLines.length} source lines and ${totalCharacters.toLocaleString()} characters; showing the first and last changed hunks.`
     : '';
@@ -140,7 +143,7 @@ function renderRawJsonDiff(before, after) {
   ];
 }
 
-function edgeDiff(before, after) {
+function contextualEdgeDiff(before, after) {
   let prefix = 0;
   while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) {
     prefix += 1;
@@ -155,12 +158,31 @@ function edgeDiff(before, after) {
     suffix += 1;
   }
 
-  return [
+  const beforeEnd = before.length - suffix;
+  const afterEnd = after.length - suffix;
+  const firstBeforeEnd = Math.min(beforeEnd, prefix + EDGE_DIFF_CHANGE_LINES);
+  const firstAfterEnd = Math.min(afterEnd, prefix + EDGE_DIFF_CHANGE_LINES);
+  const lastBeforeStart = Math.max(prefix, beforeEnd - EDGE_DIFF_CHANGE_LINES);
+  const lastAfterStart = Math.max(prefix, afterEnd - EDGE_DIFF_CHANGE_LINES);
+  const output = [
     ...before.slice(Math.max(0, prefix - DIFF_CONTEXT_LINES), prefix).map((line) => `  ${line}`),
-    ...before.slice(prefix, before.length - suffix).map((line) => `- ${line}`),
-    ...after.slice(prefix, after.length - suffix).map((line) => `+ ${line}`),
-    ...after.slice(after.length - suffix, after.length - suffix + DIFF_CONTEXT_LINES).map((line) => `  ${line}`),
+    ...before.slice(prefix, firstBeforeEnd).map((line) => `- ${line}`),
+    ...after.slice(prefix, firstAfterEnd).map((line) => `+ ${line}`),
   ];
+  const omitted = Math.max(0, (lastBeforeStart - firstBeforeEnd) + (lastAfterStart - firstAfterEnd));
+  if (omitted > 0) {
+    output.push(`  ... ${omitted} changed-region lines omitted ...`);
+  }
+  if (lastBeforeStart >= firstBeforeEnd || lastAfterStart >= firstAfterEnd) {
+    output.push(
+      ...before.slice(lastBeforeStart, beforeEnd).map((line) => `- ${line}`),
+      ...after.slice(lastAfterStart, afterEnd).map((line) => `+ ${line}`),
+    );
+  }
+  output.push(
+    ...after.slice(afterEnd, afterEnd + DIFF_CONTEXT_LINES).map((line) => `  ${line}`),
+  );
+  return limitContextOutput(output);
 }
 
 function diffHunks(lines) {
