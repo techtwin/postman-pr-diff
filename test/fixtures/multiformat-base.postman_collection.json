@@ -1,0 +1,12 @@
+{
+  "info": {"name": "Formats", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
+  "event": [{"listen": "prerequest", "script": {"exec": ["pm.environment.set('token', 'before-secret');"]}}],
+  "item": [
+    {"name": "XML", "request": {"method": "POST", "url": "/xml", "body": {"mode": "raw", "raw": "<book id=\"1\"><title>Old</title></book>", "options": {"raw": {"language": "xml"}}}}},
+    {"name": "Encoded", "request": {"method": "POST", "url": "/encoded", "body": {"mode": "urlencoded", "urlencoded": [{"key": "enabled", "value": "old"}, {"key": "ignored", "value": "before", "disabled": true}]}}},
+    {"name": "Form", "request": {"method": "POST", "url": "/form", "body": {"mode": "formdata", "formdata": [{"key": "photo", "type": "file", "src": "/private/before.jpg"}, {"key": "caption", "value": "old"}]}}},
+    {"name": "GraphQL", "request": {"method": "POST", "url": "/graphql", "body": {"mode": "graphql", "graphql": {"query": "query Book { book { id } }", "variables": "{\"token\":\"before-secret\",\"id\":1}"}}}},
+    {"name": "Raw", "event": [{"listen": "test", "script": {"exec": ["pm.test('old', () => true);"]}}], "request": {"method": "POST", "url": "/raw", "body": {"mode": "raw", "raw": "Authorization: before-secret\nconst status = 'old';", "options": {"raw": {"language": "javascript"}}}}},
+    {"name": "File", "request": {"method": "POST", "url": "/file", "body": {"mode": "file", "file": {"src": "/private/before.pdf"}}}}
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "info": {"name": "Formats", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
+  "event": [{"listen": "prerequest", "script": {"exec": ["pm.environment.set('token', 'after-secret');"]}}],
+  "item": [
+    {"name": "XML", "request": {"method": "POST", "url": "/xml", "body": {"mode": "raw", "raw": "<book id=\"2\"><title>New</title></book>", "options": {"raw": {"language": "xml"}}}}},
+    {"name": "Encoded", "request": {"method": "POST", "url": "/encoded", "body": {"mode": "urlencoded", "urlencoded": [{"key": "enabled", "value": "new"}, {"key": "ignored", "value": "after", "disabled": true}]}}},
+    {"name": "Form", "request": {"method": "POST", "url": "/form", "body": {"mode": "formdata", "formdata": [{"key": "photo", "type": "file", "src": "/private/after.jpg"}, {"key": "caption", "value": "new"}]}}},
+    {"name": "GraphQL", "request": {"method": "POST", "url": "/graphql", "body": {"mode": "graphql", "graphql": {"query": "query Book { book { title } }", "variables": "{\"id\":2,\"token\":\"after-secret\"}"}}}},
+    {"name": "Raw", "event": [{"listen": "test", "script": {"exec": ["pm.test('new', () => true);"]}}], "request": {"method": "POST", "url": "/raw", "body": {"mode": "raw", "raw": "Authorization: after-secret\nconst status = 'new';", "options": {"raw": {"language": "javascript"}}}}},
+    {"name": "File", "request": {"method": "POST", "url": "/file", "body": {"mode": "file", "file": {"src": "/private/after.pdf"}}}}
+  ]
+}

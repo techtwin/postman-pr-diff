@@ -4,6 +4,21 @@
 
 It compares the GitHub API's merge-base revision with the current PR head. It never checks out the pull request, runs collection scripts, or executes PR-provided code.
 
+## Architecture and security model
+
+The Action is intentionally split by trust boundary:
+
+| Module | Responsibility |
+| --- | --- |
+| `src/index.js` | Retrieves pull request metadata and collection files through GitHub's API, then publishes the non-blocking report. |
+| `src/collection.js` and `src/formats.js` | Parse Collection v2.1 JSON and normalize requests, body modes, and inert script events. |
+| `src/diff.js` | Produces deterministic request and collection-script change models. |
+| `src/redaction.js` and `src/render-utils.js` | Centralize recursive secret redaction, Markdown-safe formatting, output limits, and bounded text diffs. |
+| `src/body-renderer.js` and `src/script-renderer.js` | Render safe format-specific and script details without evaluating content. |
+| `src/render.js` | Composes the compact per-collection report and delegates untrusted-content rendering to the bounded helpers. |
+
+The Action does not check out PR code or invoke Postman. XML processing rejects DTDs and entities, disables entity processing, and enforces input-size, depth, and node limits. File and binary bodies are metadata-only. All rendered user-controlled content flows through redaction and size limits before being included in Markdown.
+
 ## Setup
 
 Add this workflow to `.github/workflows/postman-pr-diff.yml`:
@@ -53,6 +68,20 @@ Raw JSON request bodies are parsed and compared structurally. The report uses re
 
 Each changed JSON body also includes an expandable `View exact body changes (raw JSON diff)` section. It contains a red/green GitHub `diff` block generated from redacted, key-sorted, pretty JSON so simple property additions and removals remain easy to inspect. The raw diff is omitted with an explicit size or line-count notice when it exceeds the safety cap; the concise structural summary remains the primary view. Raw non-JSON body content is intentionally omitted and marked as changed.
 
+## Supported body and script formats
+
+| Postman body mode | Semantic report |
+| --- | --- |
+| `raw` JSON | Structural JSON paths plus bounded, expandable exact diff. |
+| `raw` XML | Element, attribute, and text changes after parsing without DTDs, entities, or network resolution. Malformed, unsafe, deep, or oversized XML emits an omission notice. |
+| `raw` HTML, JavaScript, text, and other | Redacted, bounded expandable text diff. |
+| `urlencoded` | Enabled fields only, sorted by name. |
+| `formdata` | Field changes; file fields show filename metadata only, never file content or source paths. |
+| `graphql` | Query diff plus canonical JSON variables comparison. |
+| `file` / `binary` | Filename metadata only. |
+
+Collection and request `prerequest` and `test` events are compared deterministically and rendered as collapsed, redacted, capped script diffs. Scripts, entities, templates, and file content are never executed, interpolated, or fetched.
+
 Header values with sensitive names (for example, `Authorization`, `Cookie`, API keys, tokens, passwords, and secrets), sensitive query parameters, and authentication values are redacted. Long or large bodies are omitted rather than expanded, and the whole comment has a size limit.
 
 Request scripts, examples, collection metadata, descriptions, variable values, response examples, and array ordering are intentionally outside the semantic comparison. The Action accepts only Collection v2.1 documents and reports a per-file warning for invalid JSON or an unsupported schema.
@@ -66,3 +95,5 @@ npm run build
 ```
 
 Commit the generated `dist/` output with source changes: GitHub Actions runs the bundled entry point rather than installing dependencies at execution time.
+
+The Node built-in test suite covers request additions/removals/modifications, body-format dispatch, XML hardening and fallback notices, disabled form fields, file privacy, script diffs, secret redaction, and comment/update behavior.
