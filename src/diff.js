@@ -56,7 +56,10 @@ function compareCollections(base, head) {
 }
 
 function countChanges(changes) {
-  return changes.added.length + changes.removed.length + changes.modified.length;
+  return changes.added.length
+    + changes.removed.length
+    + changes.modified.length
+    + (changes.collectionEvents || []).length;
 }
 
 module.exports = { changedRequestFields, compareCollections, compareEvents, countChanges };

@@ -93,12 +93,15 @@ function summaryText(results) {
       sum.added += result.changes.added.length;
       sum.removed += result.changes.removed.length;
       sum.modified += result.changes.modified.length;
+      sum.collectionScripts += (result.changes.collectionEvents || []).length;
       return sum;
     },
-    { added: 0, removed: 0, modified: 0, errors: 0 },
+    {
+      added: 0, removed: 0, modified: 0, collectionScripts: 0, errors: 0,
+    },
   );
-  const changed = totals.added + totals.removed + totals.modified;
-  return `Compared ${results.length} collection file${results.length === 1 ? '' : 's'}: ${changed} request change${changed === 1 ? '' : 's'} (${totals.added} added, ${totals.removed} removed, ${totals.modified} modified)${totals.errors ? `; ${totals.errors} file error${totals.errors === 1 ? '' : 's'}` : ''}.`;
+  const changed = totals.added + totals.removed + totals.modified + totals.collectionScripts;
+  return `Compared ${results.length} collection file${results.length === 1 ? '' : 's'}: ${changed} semantic change${changed === 1 ? '' : 's'} (${totals.added} added, ${totals.removed} removed, ${totals.modified} modified, ${totals.collectionScripts} collection script change${totals.collectionScripts === 1 ? '' : 's'})${totals.errors ? `; ${totals.errors} file error${totals.errors === 1 ? '' : 's'}` : ''}.`;
 }
 
 async function run() {

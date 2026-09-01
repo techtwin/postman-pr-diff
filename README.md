@@ -4,6 +4,21 @@
 
 It compares the GitHub API's merge-base revision with the current PR head. It never checks out the pull request, runs collection scripts, or executes PR-provided code.
 
+## Architecture and security model
+
+The Action is intentionally split by trust boundary:
+
+| Module | Responsibility |
+| --- | --- |
+| `src/index.js` | Retrieves pull request metadata and collection files through GitHub's API, then publishes the non-blocking report. |
+| `src/collection.js` and `src/formats.js` | Parse Collection v2.1 JSON and normalize requests, body modes, and inert script events. |
+| `src/diff.js` | Produces deterministic request and collection-script change models. |
+| `src/redaction.js` and `src/render-utils.js` | Centralize recursive secret redaction, Markdown-safe formatting, output limits, and bounded text diffs. |
+| `src/body-renderer.js` and `src/script-renderer.js` | Render safe format-specific and script details without evaluating content. |
+| `src/render.js` | Composes the compact per-collection report and delegates untrusted-content rendering to the bounded helpers. |
+
+The Action does not check out PR code or invoke Postman. XML processing rejects DTDs and entities, disables entity processing, and enforces input-size, depth, and node limits. File and binary bodies are metadata-only. All rendered user-controlled content flows through redaction and size limits before being included in Markdown.
+
 ## Setup
 
 Add this workflow to `.github/workflows/postman-pr-diff.yml`:
@@ -80,3 +95,5 @@ npm run build
 ```
 
 Commit the generated `dist/` output with source changes: GitHub Actions runs the bundled entry point rather than installing dependencies at execution time.
+
+The Node built-in test suite covers request additions/removals/modifications, body-format dispatch, XML hardening and fallback notices, disabled form fields, file privacy, script diffs, secret redaction, and comment/update behavior.
