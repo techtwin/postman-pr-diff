@@ -137,9 +137,9 @@ test('compacts a wrapped object into a structural move instead of a JSON wall', 
   assert.match(markdown, /```diff/);
 });
 
-test('omits oversized raw JSON diffs while preserving structural changes', () => {
-  const before = { mode: 'raw', raw: JSON.stringify({ description: 'before'.repeat(1_500) }) };
-  const after = { mode: 'raw', raw: JSON.stringify({ description: 'after'.repeat(1_500) }) };
+test('contextually truncates oversized raw JSON diffs while preserving structural changes', () => {
+  const before = { mode: 'raw', raw: JSON.stringify({ description: 'before'.repeat(3_000) }) };
+  const after = { mode: 'raw', raw: JSON.stringify({ description: 'after'.repeat(3_000) }) };
   const markdown = renderModifiedRequest({
     key: 'Books / Update books',
     before: { method: 'PUT', url: '/api/books', header: [], body: before, auth: null },
@@ -148,8 +148,9 @@ test('omits oversized raw JSON diffs while preserving structural changes', () =>
   });
 
   assert.match(markdown, /Updated `\$\.description`/);
-  assert.match(markdown, /Raw JSON diff omitted: .* exceeds the 12,000 character limit/);
-  assert.doesNotMatch(markdown, /```diff/);
+  assert.match(markdown, /Raw JSON diff truncated: .* showing the first and last changed hunks/);
+  assert.match(markdown, /```diff/);
+  assert.match(markdown, /characters omitted/);
 });
 
 test('renders authentication types and configuration names without secret values', () => {

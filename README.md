@@ -66,7 +66,7 @@ The sticky comment keeps per-collection counts concise and lists modified reques
 
 Raw JSON request bodies are parsed and compared structurally. The report uses readable JSON paths such as `$.vehicle.annualMileage` to show added, removed, and updated properties with safe inline values; object wrapping/moving is compacted where possible, and changed arrays are reported as replacements rather than expanded item-by-item. Object key ordering is ignored.
 
-Each changed JSON body also includes an expandable `View exact body changes (raw JSON diff)` section. It contains a red/green GitHub `diff` block generated from redacted, key-sorted, pretty JSON so simple property additions and removals remain easy to inspect. The raw diff is omitted with an explicit size or line-count notice when it exceeds the safety cap; the concise structural summary remains the primary view. Raw non-JSON body content is intentionally omitted and marked as changed.
+Each changed JSON body also includes an expandable `View exact body changes (raw JSON diff)` section. It contains a red/green GitHub `diff` block generated from redacted, key-sorted, pretty JSON so simple property additions and removals remain easy to inspect. Exact diffs use a 24,000-character and 400-line budget; above either limit, the report keeps the structural summary and shows the first and last changed hunks with explicit omitted-line and character markers. Raw non-JSON body content is intentionally omitted and marked as changed.
 
 ## Supported body and script formats
 

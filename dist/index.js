@@ -29942,8 +29942,12 @@ const {
 } = __nccwpck_require__(3677);
 
 const MAX_JSON_CHANGES = 60;
-const MAX_RAW_JSON_CHARACTERS = 12_000;
-const MAX_RAW_DIFF_LINES = 180;
+const MAX_RAW_JSON_CHARACTERS = 24_000;
+const MAX_RAW_DIFF_LINES = 400;
+const MAX_CONTEXT_DIFF_LINES = 160;
+const MAX_CONTEXT_DIFF_CHARACTERS = 16_000;
+const DIFF_CONTEXT_LINES = 3;
+const MAX_DIFF_LINE_CHARACTERS = 800;
 
 function canonicalJson(value) {
   return JSON.stringify(stableValue(redactValue(value)), null, 2);
@@ -30037,14 +30041,76 @@ function renderRawJsonDiff(before, after) {
   const previous = canonicalJson(before);
   const current = canonicalJson(after);
   const totalCharacters = previous.length + current.length;
-  if (totalCharacters > MAX_RAW_JSON_CHARACTERS) {
-    return ['<details><summary>View exact body changes (raw JSON diff)</summary>', '', `Raw JSON diff omitted: ${totalCharacters.toLocaleString()} characters exceeds the ${MAX_RAW_JSON_CHARACTERS.toLocaleString()} character limit.`, '', '</details>', ''];
-  }
   const lines = lineDiff(previous, current);
-  if (lines.length > MAX_RAW_DIFF_LINES) {
-    return ['<details><summary>View exact body changes (raw JSON diff)</summary>', '', `Raw JSON diff omitted: ${lines.length} lines exceeds the ${MAX_RAW_DIFF_LINES} line limit. The structural summary above remains complete up to its own limit.`, '', '</details>', ''];
+  const exceedsLimit = totalCharacters > MAX_RAW_JSON_CHARACTERS
+    || lines.length > MAX_RAW_DIFF_LINES
+    || lines.join('\n').length > MAX_CONTEXT_DIFF_CHARACTERS;
+  const display = exceedsLimit ? contextualDiff(lines) : lines;
+  const note = exceedsLimit
+    ? `Raw JSON diff truncated: ${lines.length} lines and ${totalCharacters.toLocaleString()} characters; showing the first and last changed hunks.`
+    : '';
+
+  return [
+    '<details><summary>View exact body changes (raw JSON diff)</summary>',
+    '',
+    ...(note ? [note, ''] : []),
+    fencedDiff(display),
+    '',
+    '</details>',
+    '',
+  ];
+}
+
+function diffHunks(lines) {
+  const changes = lines
+    .map((line, index) => ({ line, index }))
+    .filter(({ line }) => line.startsWith('+ ') || line.startsWith('- '));
+  if (changes.length === 0) {
+    return [{ start: 0, end: lines.length - 1 }];
   }
-  return ['<details><summary>View exact body changes (raw JSON diff)</summary>', '', fencedDiff(lines), '', '</details>', ''];
+
+  const ranges = changes.map(({ index }) => ({
+    start: Math.max(0, index - DIFF_CONTEXT_LINES),
+    end: Math.min(lines.length - 1, index + DIFF_CONTEXT_LINES),
+  }));
+  return ranges.reduce((hunks, range) => {
+    const previous = hunks.at(-1);
+    if (previous && range.start <= previous.end + 1) {
+      previous.end = Math.max(previous.end, range.end);
+    } else {
+      hunks.push(range);
+    }
+    return hunks;
+  }, []);
+}
+
+function truncateDiffLine(line) {
+  if (line.length <= MAX_DIFF_LINE_CHARACTERS) {
+    return line;
+  }
+  return `${line.slice(0, MAX_DIFF_LINE_CHARACTERS - 52)}... [${line.length - MAX_DIFF_LINE_CHARACTERS + 52} characters omitted]`;
+}
+
+function contextualDiff(lines) {
+  const hunks = diffHunks(lines);
+  const selected = hunks.length === 1 ? hunks : [hunks[0], hunks.at(-1)];
+  const output = [];
+  let previousEnd = -1;
+
+  for (const hunk of selected) {
+    if (previousEnd >= 0 && hunk.start > previousEnd + 1) {
+      output.push(`  ... ${hunk.start - previousEnd - 1} unchanged lines omitted ...`);
+    }
+    for (let index = hunk.start; index <= hunk.end; index += 1) {
+      if (output.length >= MAX_CONTEXT_DIFF_LINES) {
+        output.push('  ... additional diff context omitted ...');
+        return output;
+      }
+      output.push(truncateDiffLine(lines[index]));
+    }
+    previousEnd = hunk.end;
+  }
+  return output;
 }
 
 function fieldMap(fields) {
