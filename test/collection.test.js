@@ -153,6 +153,26 @@ test('contextually truncates oversized raw JSON diffs while preserving structura
   assert.match(markdown, /characters omitted/);
 });
 
+test('keeps first and last changed lines when a multiline JSON diff exceeds its line budget', () => {
+  const beforeValue = Object.fromEntries(
+    Array.from({ length: 500 }, (_, index) => [`field${index}`, `before-${index}`]),
+  );
+  const afterValue = Object.fromEntries(
+    Array.from({ length: 500 }, (_, index) => [`field${index}`, `after-${index}`]),
+  );
+  const markdown = renderModifiedRequest({
+    key: 'Books / Bulk update',
+    before: { method: 'PUT', url: '/books', header: [], body: { mode: 'raw', raw: JSON.stringify(beforeValue) }, auth: null },
+    after: { method: 'PUT', url: '/books', header: [], body: { mode: 'raw', raw: JSON.stringify(afterValue) }, auth: null },
+    fields: ['body'],
+  });
+
+  assert.match(markdown, /Raw JSON diff truncated/);
+  assert.match(markdown, /-\s+"field0": "before-0"/);
+  assert.match(markdown, /\+\s+"field99": "after-99"/);
+  assert.match(markdown, /hunk lines omitted|diff lines omitted/);
+});
+
 test('renders authentication types and configuration names without secret values', () => {
   const markdown = renderModifiedRequest({
     key: 'Auth / Token',

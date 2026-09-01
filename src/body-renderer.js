@@ -16,10 +16,10 @@ const {
 const MAX_JSON_CHANGES = 60;
 const MAX_RAW_JSON_CHARACTERS = 24_000;
 const MAX_RAW_DIFF_LINES = 400;
-const MAX_CONTEXT_DIFF_LINES = 160;
-const MAX_CONTEXT_DIFF_CHARACTERS = 16_000;
+const MAX_CONTEXT_DIFF_LINES = 120;
+const MAX_CONTEXT_DIFF_CHARACTERS = 12_000;
 const DIFF_CONTEXT_LINES = 3;
-const MAX_DIFF_LINE_CHARACTERS = 800;
+const MAX_DIFF_LINE_CHARACTERS = 400;
 
 function canonicalJson(value) {
   return JSON.stringify(stableValue(redactValue(value)), null, 2);
@@ -113,13 +113,20 @@ function renderRawJsonDiff(before, after) {
   const previous = canonicalJson(before);
   const current = canonicalJson(after);
   const totalCharacters = previous.length + current.length;
-  const lines = lineDiff(previous, current);
-  const exceedsLimit = totalCharacters > MAX_RAW_JSON_CHARACTERS
+  const previousLines = previous.split('\n');
+  const currentLines = current.split('\n');
+  const requiresContext = totalCharacters > MAX_RAW_JSON_CHARACTERS
+    || previousLines.length > MAX_RAW_DIFF_LINES
+    || currentLines.length > MAX_RAW_DIFF_LINES;
+  const lines = requiresContext
+    ? edgeDiff(previousLines, currentLines)
+    : lineDiff(previous, current);
+  const exceedsLimit = requiresContext
     || lines.length > MAX_RAW_DIFF_LINES
     || lines.join('\n').length > MAX_CONTEXT_DIFF_CHARACTERS;
   const display = exceedsLimit ? contextualDiff(lines) : lines;
   const note = exceedsLimit
-    ? `Raw JSON diff truncated: ${lines.length} lines and ${totalCharacters.toLocaleString()} characters; showing the first and last changed hunks.`
+    ? `Raw JSON diff truncated: ${previousLines.length + currentLines.length} source lines and ${totalCharacters.toLocaleString()} characters; showing the first and last changed hunks.`
     : '';
 
   return [
@@ -130,6 +137,29 @@ function renderRawJsonDiff(before, after) {
     '',
     '</details>',
     '',
+  ];
+}
+
+function edgeDiff(before, after) {
+  let prefix = 0;
+  while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) {
+    prefix += 1;
+  }
+
+  let suffix = 0;
+  while (
+    suffix < before.length - prefix
+    && suffix < after.length - prefix
+    && before[before.length - suffix - 1] === after[after.length - suffix - 1]
+  ) {
+    suffix += 1;
+  }
+
+  return [
+    ...before.slice(Math.max(0, prefix - DIFF_CONTEXT_LINES), prefix).map((line) => `  ${line}`),
+    ...before.slice(prefix, before.length - suffix).map((line) => `- ${line}`),
+    ...after.slice(prefix, after.length - suffix).map((line) => `+ ${line}`),
+    ...after.slice(after.length - suffix, after.length - suffix + DIFF_CONTEXT_LINES).map((line) => `  ${line}`),
   ];
 }
 
@@ -173,16 +203,65 @@ function contextualDiff(lines) {
     if (previousEnd >= 0 && hunk.start > previousEnd + 1) {
       output.push(`  ... ${hunk.start - previousEnd - 1} unchanged lines omitted ...`);
     }
-    for (let index = hunk.start; index <= hunk.end; index += 1) {
-      if (output.length >= MAX_CONTEXT_DIFF_LINES) {
-        output.push('  ... additional diff context omitted ...');
-        return output;
-      }
-      output.push(truncateDiffLine(lines[index]));
+    const hunkLines = lines
+      .slice(hunk.start, hunk.end + 1)
+      .map(truncateDiffLine);
+    output.push(...truncateHunk(hunkLines));
+    if (output.length >= MAX_CONTEXT_DIFF_LINES) {
+      break;
     }
     previousEnd = hunk.end;
   }
-  return output;
+  return limitContextOutput(output);
+}
+
+function truncateHunk(lines) {
+  const maxLines = Math.max(2, Math.floor(MAX_CONTEXT_DIFF_LINES / 2));
+  if (lines.length <= maxLines) {
+    return lines;
+  }
+  const edgeSize = Math.floor((maxLines - 1) / 2);
+  return [
+    ...lines.slice(0, edgeSize),
+    `  ... ${lines.length - (edgeSize * 2)} hunk lines omitted ...`,
+    ...lines.slice(-edgeSize),
+  ];
+}
+
+function limitContextOutput(lines) {
+  const compact = lines.map(truncateDiffLine);
+  if (compact.length <= MAX_CONTEXT_DIFF_LINES && compact.join('\n').length <= MAX_CONTEXT_DIFF_CHARACTERS) {
+    return compact;
+  }
+
+  const first = [];
+  const last = [];
+  let firstIndex = 0;
+  let lastIndex = compact.length - 1;
+  const halfBudget = Math.floor((MAX_CONTEXT_DIFF_CHARACTERS - 80) / 2);
+  let firstLength = 0;
+  let lastLength = 0;
+
+  while (firstIndex <= lastIndex && first.length < MAX_CONTEXT_DIFF_LINES / 2) {
+    const line = compact[firstIndex];
+    if (firstLength + line.length + 1 > halfBudget) break;
+    first.push(line);
+    firstLength += line.length + 1;
+    firstIndex += 1;
+  }
+  while (lastIndex >= firstIndex && last.length < MAX_CONTEXT_DIFF_LINES / 2) {
+    const line = compact[lastIndex];
+    if (lastLength + line.length + 1 > halfBudget) break;
+    last.unshift(line);
+    lastLength += line.length + 1;
+    lastIndex -= 1;
+  }
+
+  return [
+    ...first,
+    `  ... ${Math.max(0, lastIndex - firstIndex + 1)} diff lines omitted ...`,
+    ...last,
+  ];
 }
 
 function fieldMap(fields) {
