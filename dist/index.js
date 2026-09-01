@@ -29942,8 +29942,13 @@ const {
 } = __nccwpck_require__(3677);
 
 const MAX_JSON_CHANGES = 60;
-const MAX_RAW_JSON_CHARACTERS = 12_000;
-const MAX_RAW_DIFF_LINES = 180;
+const MAX_RAW_JSON_CHARACTERS = 24_000;
+const MAX_RAW_DIFF_LINES = 400;
+const MAX_CONTEXT_DIFF_LINES = 120;
+const MAX_CONTEXT_DIFF_CHARACTERS = 12_000;
+const DIFF_CONTEXT_LINES = 3;
+const MAX_DIFF_LINE_CHARACTERS = 240;
+const EDGE_DIFF_CHANGE_LINES = 10;
 
 function canonicalJson(value) {
   return JSON.stringify(stableValue(redactValue(value)), null, 2);
@@ -30037,14 +30042,179 @@ function renderRawJsonDiff(before, after) {
   const previous = canonicalJson(before);
   const current = canonicalJson(after);
   const totalCharacters = previous.length + current.length;
-  if (totalCharacters > MAX_RAW_JSON_CHARACTERS) {
-    return ['<details><summary>View exact body changes (raw JSON diff)</summary>', '', `Raw JSON diff omitted: ${totalCharacters.toLocaleString()} characters exceeds the ${MAX_RAW_JSON_CHARACTERS.toLocaleString()} character limit.`, '', '</details>', ''];
+  const previousLines = previous.split('\n');
+  const currentLines = current.split('\n');
+  const requiresContext = totalCharacters > MAX_RAW_JSON_CHARACTERS
+    || previousLines.length > MAX_RAW_DIFF_LINES
+    || currentLines.length > MAX_RAW_DIFF_LINES;
+  const lines = requiresContext ? null : lineDiff(previous, current);
+  const exceedsLimit = requiresContext
+    || lines.length > MAX_RAW_DIFF_LINES
+    || lines.join('\n').length > MAX_CONTEXT_DIFF_CHARACTERS;
+  const display = requiresContext
+    ? contextualEdgeDiff(previousLines, currentLines)
+    : exceedsLimit
+      ? contextualDiff(lines)
+      : lines;
+  const note = exceedsLimit
+    ? `Raw JSON diff truncated: ${previousLines.length + currentLines.length} source lines and ${totalCharacters.toLocaleString()} characters; showing the first and last changed hunks.`
+    : '';
+
+  return [
+    '<details><summary>View exact body changes (raw JSON diff)</summary>',
+    '',
+    ...(note ? [note, ''] : []),
+    fencedDiff(display),
+    '',
+    '</details>',
+    '',
+  ];
+}
+
+function contextualEdgeDiff(before, after) {
+  let prefix = 0;
+  while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) {
+    prefix += 1;
   }
-  const lines = lineDiff(previous, current);
-  if (lines.length > MAX_RAW_DIFF_LINES) {
-    return ['<details><summary>View exact body changes (raw JSON diff)</summary>', '', `Raw JSON diff omitted: ${lines.length} lines exceeds the ${MAX_RAW_DIFF_LINES} line limit. The structural summary above remains complete up to its own limit.`, '', '</details>', ''];
+
+  let suffix = 0;
+  while (
+    suffix < before.length - prefix
+    && suffix < after.length - prefix
+    && before[before.length - suffix - 1] === after[after.length - suffix - 1]
+  ) {
+    suffix += 1;
   }
-  return ['<details><summary>View exact body changes (raw JSON diff)</summary>', '', fencedDiff(lines), '', '</details>', ''];
+
+  const beforeEnd = before.length - suffix;
+  const afterEnd = after.length - suffix;
+  const firstBeforeEnd = Math.min(beforeEnd, prefix + EDGE_DIFF_CHANGE_LINES);
+  const firstAfterEnd = Math.min(afterEnd, prefix + EDGE_DIFF_CHANGE_LINES);
+  const lastBeforeStart = Math.max(prefix, beforeEnd - EDGE_DIFF_CHANGE_LINES);
+  const lastAfterStart = Math.max(prefix, afterEnd - EDGE_DIFF_CHANGE_LINES);
+  const overlaps = lastBeforeStart < firstBeforeEnd || lastAfterStart < firstAfterEnd;
+  const output = [
+    ...before.slice(Math.max(0, prefix - DIFF_CONTEXT_LINES), prefix).map((line) => `  ${line}`),
+    ...before.slice(prefix, overlaps ? beforeEnd : firstBeforeEnd).map((line) => `- ${line}`),
+    ...after.slice(prefix, overlaps ? afterEnd : firstAfterEnd).map((line) => `+ ${line}`),
+  ];
+  const omitted = overlaps
+    ? 0
+    : Math.max(0, (lastBeforeStart - firstBeforeEnd) + (lastAfterStart - firstAfterEnd));
+  if (omitted > 0) {
+    output.push(`  ... ${omitted} changed-region lines omitted ...`);
+  }
+  if (!overlaps && lastBeforeStart >= firstBeforeEnd) {
+    output.push(...before.slice(lastBeforeStart, beforeEnd).map((line) => `- ${line}`));
+  }
+  if (!overlaps && lastAfterStart >= firstAfterEnd) {
+    output.push(...after.slice(lastAfterStart, afterEnd).map((line) => `+ ${line}`));
+  }
+  output.push(
+    ...after.slice(afterEnd, afterEnd + DIFF_CONTEXT_LINES).map((line) => `  ${line}`),
+  );
+  return limitContextOutput(output);
+}
+
+function diffHunks(lines) {
+  const changes = lines
+    .map((line, index) => ({ line, index }))
+    .filter(({ line }) => line.startsWith('+ ') || line.startsWith('- '));
+  if (changes.length === 0) {
+    return [{ start: 0, end: lines.length - 1 }];
+  }
+
+  const ranges = changes.map(({ index }) => ({
+    start: Math.max(0, index - DIFF_CONTEXT_LINES),
+    end: Math.min(lines.length - 1, index + DIFF_CONTEXT_LINES),
+  }));
+  return ranges.reduce((hunks, range) => {
+    const previous = hunks.at(-1);
+    if (previous && range.start <= previous.end + 1) {
+      previous.end = Math.max(previous.end, range.end);
+    } else {
+      hunks.push(range);
+    }
+    return hunks;
+  }, []);
+}
+
+function truncateDiffLine(line) {
+  if (line.length <= MAX_DIFF_LINE_CHARACTERS) {
+    return line;
+  }
+  return `${line.slice(0, MAX_DIFF_LINE_CHARACTERS - 52)}... [${line.length - MAX_DIFF_LINE_CHARACTERS + 52} characters omitted]`;
+}
+
+function contextualDiff(lines) {
+  const hunks = diffHunks(lines);
+  const selected = hunks.length === 1 ? hunks : [hunks[0], hunks.at(-1)];
+  const output = [];
+  let previousEnd = -1;
+
+  for (const hunk of selected) {
+    if (previousEnd >= 0 && hunk.start > previousEnd + 1) {
+      output.push(`  ... ${hunk.start - previousEnd - 1} diff lines omitted ...`);
+    }
+    const hunkLines = lines
+      .slice(hunk.start, hunk.end + 1)
+      .map(truncateDiffLine);
+    output.push(...truncateHunk(hunkLines));
+    if (output.length >= MAX_CONTEXT_DIFF_LINES) {
+      break;
+    }
+    previousEnd = hunk.end;
+  }
+  return limitContextOutput(output);
+}
+
+function truncateHunk(lines) {
+  const maxLines = Math.max(2, Math.floor(MAX_CONTEXT_DIFF_LINES / 2));
+  if (lines.length <= maxLines) {
+    return lines;
+  }
+  const edgeSize = Math.floor((maxLines - 1) / 2);
+  return [
+    ...lines.slice(0, edgeSize),
+    `  ... ${lines.length - (edgeSize * 2)} hunk lines omitted ...`,
+    ...lines.slice(-edgeSize),
+  ];
+}
+
+function limitContextOutput(lines) {
+  const compact = lines.map(truncateDiffLine);
+  if (compact.length <= MAX_CONTEXT_DIFF_LINES && compact.join('\n').length <= MAX_CONTEXT_DIFF_CHARACTERS) {
+    return compact;
+  }
+
+  const first = [];
+  const last = [];
+  let firstIndex = 0;
+  let lastIndex = compact.length - 1;
+  const halfBudget = Math.floor((MAX_CONTEXT_DIFF_CHARACTERS - 80) / 2);
+  let firstLength = 0;
+  let lastLength = 0;
+
+  while (firstIndex <= lastIndex && first.length < MAX_CONTEXT_DIFF_LINES / 2) {
+    const line = compact[firstIndex];
+    if (firstLength + line.length + 1 > halfBudget) break;
+    first.push(line);
+    firstLength += line.length + 1;
+    firstIndex += 1;
+  }
+  while (lastIndex >= firstIndex && last.length < MAX_CONTEXT_DIFF_LINES / 2) {
+    const line = compact[lastIndex];
+    if (lastLength + line.length + 1 > halfBudget) break;
+    last.unshift(line);
+    lastLength += line.length + 1;
+    lastIndex -= 1;
+  }
+
+  return [
+    ...first,
+    `  ... ${Math.max(0, lastIndex - firstIndex + 1)} diff lines omitted ...`,
+    ...last,
+  ];
 }
 
 function fieldMap(fields) {

@@ -137,9 +137,9 @@ test('compacts a wrapped object into a structural move instead of a JSON wall', 
   assert.match(markdown, /```diff/);
 });
 
-test('omits oversized raw JSON diffs while preserving structural changes', () => {
-  const before = { mode: 'raw', raw: JSON.stringify({ description: 'before'.repeat(1_500) }) };
-  const after = { mode: 'raw', raw: JSON.stringify({ description: 'after'.repeat(1_500) }) };
+test('contextually truncates oversized raw JSON diffs while preserving structural changes', () => {
+  const before = { mode: 'raw', raw: JSON.stringify({ description: 'before'.repeat(3_000) }) };
+  const after = { mode: 'raw', raw: JSON.stringify({ description: 'after'.repeat(3_000) }) };
   const markdown = renderModifiedRequest({
     key: 'Books / Update books',
     before: { method: 'PUT', url: '/api/books', header: [], body: before, auth: null },
@@ -148,8 +148,65 @@ test('omits oversized raw JSON diffs while preserving structural changes', () =>
   });
 
   assert.match(markdown, /Updated `\$\.description`/);
-  assert.match(markdown, /Raw JSON diff omitted: .* exceeds the 12,000 character limit/);
-  assert.doesNotMatch(markdown, /```diff/);
+  assert.match(markdown, /Raw JSON diff truncated: .* showing the first and last changed hunks/);
+  assert.match(markdown, /```diff/);
+  assert.match(markdown, /characters omitted/);
+});
+
+test('keeps first and last changed lines when a multiline JSON diff exceeds its line budget', () => {
+  const beforeValue = Object.fromEntries(
+    Array.from({ length: 500 }, (_, index) => [`field${index}`, `before-${index}`]),
+  );
+  const afterValue = Object.fromEntries(
+    Array.from({ length: 500 }, (_, index) => [`field${index}`, `after-${index}`]),
+  );
+  const markdown = renderModifiedRequest({
+    key: 'Books / Bulk update',
+    before: { method: 'PUT', url: '/books', header: [], body: { mode: 'raw', raw: JSON.stringify(beforeValue) }, auth: null },
+    after: { method: 'PUT', url: '/books', header: [], body: { mode: 'raw', raw: JSON.stringify(afterValue) }, auth: null },
+    fields: ['body'],
+  });
+
+  assert.match(markdown, /Raw JSON diff truncated/);
+  assert.match(markdown, /-\s+"field0": "before-0"/);
+  assert.match(markdown, /\+\s+"field0": "after-0"/);
+  assert.match(markdown, /-\s+"field99": "before-99"/);
+  assert.match(markdown, /\+\s+"field99": "after-99"/);
+  assert.match(markdown, /changed-region lines omitted|hunk lines omitted|diff lines omitted/);
+});
+
+test('does not duplicate one-sided additions in a bounded JSON preview', () => {
+  const fields = Object.fromEntries(
+    Array.from({ length: 500 }, (_, index) => [`field${index}`, `value-${index}`]),
+  );
+  const markdown = renderModifiedRequest({
+    key: 'Books / Add field',
+    before: { method: 'PUT', url: '/books', header: [], body: { mode: 'raw', raw: JSON.stringify(fields) }, auth: null },
+    after: { method: 'PUT', url: '/books', header: [], body: { mode: 'raw', raw: JSON.stringify({ aaa: 'new', ...fields }) }, auth: null },
+    fields: ['body'],
+  });
+  const added = markdown.match(/\+\s+"aaa": "new",/g) || [];
+
+  assert.equal(added.length, 1);
+});
+
+test('keeps overlapping edge previews complete for large JSON diffs', () => {
+  const beforeValue = Object.fromEntries(
+    Array.from({ length: 15 }, (_, index) => [`a${String(index).padStart(2, '0')}`, `before-${'x'.repeat(900)}`]),
+  );
+  const afterValue = Object.fromEntries(
+    Array.from({ length: 15 }, (_, index) => [`a${String(index).padStart(2, '0')}`, `after-${'y'.repeat(900)}`]),
+  );
+  const markdown = renderModifiedRequest({
+    key: 'Books / Update range',
+    before: { method: 'PUT', url: '/books', header: [], body: { mode: 'raw', raw: JSON.stringify(beforeValue) }, auth: null },
+    after: { method: 'PUT', url: '/books', header: [], body: { mode: 'raw', raw: JSON.stringify(afterValue) }, auth: null },
+    fields: ['body'],
+  });
+
+  assert.match(markdown, /-\s+"a14": "before-/);
+  assert.match(markdown, /\+\s+"a14": "after-/);
+  assert.doesNotMatch(markdown, /changed-region lines omitted/);
 });
 
 test('renders authentication types and configuration names without secret values', () => {
