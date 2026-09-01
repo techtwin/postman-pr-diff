@@ -175,6 +175,21 @@ test('keeps first and last changed lines when a multiline JSON diff exceeds its 
   assert.match(markdown, /changed-region lines omitted|hunk lines omitted|diff lines omitted/);
 });
 
+test('does not duplicate one-sided additions in a bounded JSON preview', () => {
+  const fields = Object.fromEntries(
+    Array.from({ length: 500 }, (_, index) => [`field${index}`, `value-${index}`]),
+  );
+  const markdown = renderModifiedRequest({
+    key: 'Books / Add field',
+    before: { method: 'PUT', url: '/books', header: [], body: { mode: 'raw', raw: JSON.stringify(fields) }, auth: null },
+    after: { method: 'PUT', url: '/books', header: [], body: { mode: 'raw', raw: JSON.stringify({ aaa: 'new', ...fields }) }, auth: null },
+    fields: ['body'],
+  });
+  const added = markdown.match(/\+\s+"aaa": "new",/g) || [];
+
+  assert.equal(added.length, 1);
+});
+
 test('renders authentication types and configuration names without secret values', () => {
   const markdown = renderModifiedRequest({
     key: 'Auth / Token',

@@ -173,11 +173,11 @@ function contextualEdgeDiff(before, after) {
   if (omitted > 0) {
     output.push(`  ... ${omitted} changed-region lines omitted ...`);
   }
-  if (lastBeforeStart >= firstBeforeEnd || lastAfterStart >= firstAfterEnd) {
-    output.push(
-      ...before.slice(lastBeforeStart, beforeEnd).map((line) => `- ${line}`),
-      ...after.slice(lastAfterStart, afterEnd).map((line) => `+ ${line}`),
-    );
+  if (lastBeforeStart >= firstBeforeEnd) {
+    output.push(...before.slice(lastBeforeStart, beforeEnd).map((line) => `- ${line}`));
+  }
+  if (lastAfterStart >= firstAfterEnd) {
+    output.push(...after.slice(lastAfterStart, afterEnd).map((line) => `+ ${line}`));
   }
   output.push(
     ...after.slice(afterEnd, afterEnd + DIFF_CONTEXT_LINES).map((line) => `  ${line}`),
